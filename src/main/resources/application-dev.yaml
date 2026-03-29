@@ -1,0 +1,30 @@
+# ═══════════════════════════════════════════════════
+#  DEV PROFILE — runs on your local machine
+#  Uses your local MySQL 8.0.42
+#  Create database manually once:
+#    CREATE DATABASE jobPilot_db CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+# ═══════════════════════════════════════════════════
+
+spring:
+  datasource:
+    url: ${DB_URL}
+    username: ${DB_USERNAME}
+    password: ${DB_PASSWORD}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+
+  jpa:
+    show-sql: true                  # show queries in dev only
+
+# Dev: use a fixed weak secret (NEVER use this in prod)
+# In IntelliJ: Run > Edit Configurations > Environment Variables
+# Add: JWT_SECRET=dev-secret-key-minimum-32-characters-long
+#      GEMINI_API_KEY=your-actual-gemini-key
+#      SENDGRID_API_KEY=your-actual-sendgrid-key
+#      SENDGRID_FROM_EMAIL=youremail@gmail.com
+#      DB_PASSWORD=your-local-mysql-password
+
+logging:
+  level:
+    com.jobPilot: DEBUG
+    org.springframework.security: DEBUG
+    org.flywaydb: INFO

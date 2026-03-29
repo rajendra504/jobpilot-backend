@@ -1,0 +1,118 @@
+#HELP.md
+#target/
+#.mvn/wrapper/maven-wrapper.jar
+#!**/src/main/**/target/
+#!**/src/test/**/target/
+#
+#### STS ###
+#.apt_generated
+#.classpath
+#.factorypath
+#.project
+#.settings
+#.springBeans
+#.sts4-cache
+#
+#### IntelliJ IDEA ###
+#.idea
+#*.iws
+#*.iml
+#*.ipr
+#
+#### NetBeans ###
+#/nbproject/private/
+#/nbbuild/
+#/dist/
+#/nbdist/
+#/.nb-gradle/
+#build/
+#!**/src/main/**/build/
+#!**/src/test/**/build/
+#
+#### VS Code ###
+#.vscode/
+
+
+# ═══════════════════════════════════════════════════════════════
+# JobPilot Backend — .gitignore
+# Place this file at the root of your jobpilot-api project
+# (same level as pom.xml)
+# ═══════════════════════════════════════════════════════════════
+
+# ── Maven build output ────────────────────────────────────────
+HELP.md
+target/
+!**/src/main/**/target/
+!**/src/test/**/target/
+.mvn/wrapper/maven-wrapper.jar
+
+# ── IDE — IntelliJ IDEA ───────────────────────────────────────
+.idea/
+*.iws
+*.iml
+*.ipr
+out/
+
+# ── IDE — Eclipse / STS ───────────────────────────────────────
+.apt_generated
+.classpath
+.factorypath
+.project
+.settings/
+.springBeans
+.sts4-cache
+
+# ── IDE — NetBeans ────────────────────────────────────────────
+/nbproject/private/
+/nbbuild/
+/dist/
+/nbdist/
+/.nb-gradle/
+build/
+!**/src/main/**/build/
+!**/src/test/**/build/
+
+# ── IDE — VS Code ─────────────────────────────────────────────
+.vscode/
+
+# ── CRITICAL: Environment & secrets ──────────────────────────
+# NEVER commit these — they contain API keys and passwords
+.env
+.env.local
+.env.production
+*.env
+
+# ── Application config with secrets ──────────────────────────
+# If you ever create a local override config, keep it out of git
+application-local.yml
+application-local.properties
+
+# ── Resume file uploads (local dev) ──────────────────────────
+uploads/
+/uploads/
+
+# ── Playwright browser binaries (downloaded at runtime) ───────
+# These are large and auto-downloaded — no need to commit
+playwright/
+.playwright/
+
+# ── Logs ─────────────────────────────────────────────────────
+*.log
+logs/
+/logs/
+
+# ── OS generated ──────────────────────────────────────────────
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# ── Java ──────────────────────────────────────────────────────
+*.class
+*.jar
+*.war
+*.ear
+hs_err_pid*
