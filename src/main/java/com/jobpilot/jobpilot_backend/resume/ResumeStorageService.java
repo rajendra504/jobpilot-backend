@@ -12,16 +12,6 @@ import java.nio.file.Paths;
 import java.nio.file.StandardCopyOption;
 import java.util.UUID;
 
-/**
- * Handles saving and deleting resume files on the local filesystem.
- *
- * Files are stored at: {resume-dir}/{userId}/{uuid}_{originalFilename}
- * This structure prevents filename collisions and makes per-user cleanup easy.
- *
- * On Render: files persist within the deployment container's filesystem.
- * For production durability, swap this for Cloudinary (free tier: 25GB).
- * The swap only requires changing this service — nothing else in the app changes.
- */
 @Slf4j
 @Service
 public class ResumeStorageService {
@@ -29,9 +19,6 @@ public class ResumeStorageService {
     @Value("${app.upload.resume-dir}")
     private String resumeDir;
 
-    /**
-     * Saves the uploaded file and returns the path stored in DB.
-     */
     public String save(MultipartFile file, Long userId) throws IOException {
         Path userDir = Paths.get(resumeDir, String.valueOf(userId));
         Files.createDirectories(userDir);
@@ -45,9 +32,6 @@ public class ResumeStorageService {
         return destination.toString();
     }
 
-    /**
-     * Deletes a file from disk. Non-fatal if already missing.
-     */
     public void delete(String filePath) {
         try {
             Path path = Paths.get(filePath);
@@ -62,12 +46,6 @@ public class ResumeStorageService {
         }
     }
 
-    // ── Helpers ───────────────────────────────────────────────
-
-    /**
-     * Strips any path traversal characters from the original filename.
-     * e.g. "../../etc/passwd" → "etc_passwd"
-     */
     private String sanitize(String filename) {
         if (filename == null) return "resume";
         return filename.replaceAll("[^a-zA-Z0-9._\\-]", "_");

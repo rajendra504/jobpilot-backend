@@ -16,9 +16,6 @@ public class JobPreferencesRequest {
     @NotEmpty(message = "At least one preferred location is required")
     private List<String> preferredLocations = new ArrayList<>();
 
-    /**
-     * Accepted values: FULL_TIME, PART_TIME, CONTRACT, INTERNSHIP, FREELANCE
-     */
     private List<String> jobTypes = new ArrayList<>();
 
     @DecimalMin(value = "0.0", inclusive = false, message = "Minimum salary must be positive")
@@ -30,9 +27,10 @@ public class JobPreferencesRequest {
     @Size(max = 10, message = "Currency code must be at most 10 characters")
     private String currency = "INR";
 
-    /**
-     * Accepted values: FRESHER, JUNIOR, MID, SENIOR, LEAD, MANAGER
-     */
+    private Integer dailyApplyLimit;
+
+    private Boolean autoApplyEnabled;
+
     private String experienceLevel;
 
     private List<String> preferredIndustries = new ArrayList<>();

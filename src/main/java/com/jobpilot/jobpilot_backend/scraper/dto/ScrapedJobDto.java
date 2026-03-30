@@ -3,10 +3,6 @@ package com.jobpilot.jobpilot_backend.scraper.dto;
 import lombok.Builder;
 import lombok.Data;
 
-/**
- * Internal data transfer object used by portal scrapers to pass
- * raw scraped data to JobScraperService. Never exposed via REST.
- */
 @Data
 @Builder
 public class ScrapedJobDto {

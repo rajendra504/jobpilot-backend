@@ -30,8 +30,6 @@ public class ResumeService {
     private final ResumeStorageService storageService;
     private final TikaParserService    tikaParser;
 
-    // ── Upload ────────────────────────────────────────────────
-
     @Transactional
     public ResumeResponse upload(Long userId, MultipartFile file) throws IOException {
         validateFile(file);
@@ -43,13 +41,10 @@ public class ResumeService {
 
         User user = findUser(userId);
 
-        // 1. Extract text BEFORE saving to disk (stream is still open)
         String extractedText = tikaParser.extractText(file);
 
-        // 2. Save file to disk
         String filePath = storageService.save(file, userId);
 
-        // 3. If this is the user's first resume, mark it as primary automatically
         boolean isPrimary = resumeRepository.countByUserId(userId) == 0;
 
         Resume resume = Resume.builder()
@@ -68,8 +63,6 @@ public class ResumeService {
         return toResponse(saved);
     }
 
-    // ── List all ──────────────────────────────────────────────
-
     @Transactional(readOnly = true)
     public List<ResumeResponse> listResumes(Long userId) {
         return resumeRepository.findByUserIdOrderByCreatedAtDesc(userId)
@@ -78,15 +71,11 @@ public class ResumeService {
                 .toList();
     }
 
-    // ── Get one ───────────────────────────────────────────────
-
     @Transactional(readOnly = true)
     public ResumeResponse getResume(Long userId, Long resumeId) {
         Resume resume = findResume(userId, resumeId);
         return toResponse(resume);
     }
-
-    // ── Set primary ───────────────────────────────────────────
 
     @Transactional
     public ResumeResponse setPrimary(Long userId, Long resumeId) {
@@ -99,8 +88,6 @@ public class ResumeService {
         log.info("Set resume id={} as primary for userId={}", resumeId, userId);
         return toResponse(saved);
     }
-
-    // ── Delete ────────────────────────────────────────────────
 
     @Transactional
     public void delete(Long userId, Long resumeId) {
@@ -124,20 +111,12 @@ public class ResumeService {
         log.info("Deleted resume id={} for userId={}", resumeId, userId);
     }
 
-    // ── Package-level: used by AI Engine in Module 6 ─────────
-
-    /**
-     * Returns the raw extracted text of a user's primary resume.
-     * Only called internally — not exposed via REST.
-     */
     public String getPrimaryResumeText(Long userId) {
         return resumeRepository.findByUserIdAndPrimaryTrue(userId)
                 .map(Resume::getExtractedText)
                 .orElseThrow(() -> new ResourceNotFoundException(
                         "No primary resume found for user: " + userId));
     }
-
-    // ── Validation ────────────────────────────────────────────
 
     private void validateFile(MultipartFile file) {
         if (file == null || file.isEmpty()) {
@@ -155,8 +134,6 @@ public class ResumeService {
             throw new IllegalArgumentException("File size must not exceed 5MB");
         }
     }
-
-    // ── Mapping ───────────────────────────────────────────────
 
     private ResumeResponse toResponse(Resume resume) {
         String preview = null;
@@ -180,8 +157,6 @@ public class ResumeService {
                 resume.getUpdatedAt()
         );
     }
-
-    // ── Internal helpers ──────────────────────────────────────
 
     private User findUser(Long userId) {
         return userRepository.findById(userId)

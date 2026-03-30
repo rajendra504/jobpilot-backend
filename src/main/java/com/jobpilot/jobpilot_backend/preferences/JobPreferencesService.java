@@ -37,8 +37,6 @@ public class JobPreferencesService {
         return toResponse(saved);
     }
 
-    // ─── Get ──────────────────────────────────────────────────────────────────────
-
     @Transactional(readOnly = true)
     public JobPreferencesResponse get(Authentication auth) {
         Long userId = extractUserId(auth);
@@ -47,8 +45,6 @@ public class JobPreferencesService {
                         "No job preferences found. Please create preferences first."));
         return toResponse(preferences);
     }
-
-    // ─── Delete ───────────────────────────────────────────────────────────────────
 
     @Transactional
     public void delete(Authentication auth) {
@@ -60,16 +56,12 @@ public class JobPreferencesService {
         log.info("Job preferences deleted for userId={}", userId);
     }
 
-    // ─── Internal helper used by JobScraperService ────────────────────────────────
-
     @Transactional(readOnly = true)
     public JobPreferences getEntityByUserId(Long userId) {
         return preferencesRepository.findByUserId(userId)
                 .orElseThrow(() -> new ResourceNotFoundException(
                         "User with id=" + userId + " has not set job preferences yet."));
     }
-
-    // ─── Helpers ──────────────────────────────────────────────────────────────────
 
     private void applyRequest(JobPreferences p, JobPreferencesRequest r) {
         p.setDesiredRoles(r.getDesiredRoles());
@@ -84,6 +76,9 @@ public class JobPreferencesService {
         if (r.getOpenToRemote() != null) p.setOpenToRemote(r.getOpenToRemote());
         if (r.getOpenToHybrid() != null) p.setOpenToHybrid(r.getOpenToHybrid());
         if (r.getOpenToRelocation() != null) p.setOpenToRelocation(r.getOpenToRelocation());
+
+        if (r.getDailyApplyLimit()    != null) p.setDailyApplyLimit(r.getDailyApplyLimit());
+        if (r.getAutoApplyEnabled()   != null) p.setAutoApplyEnabled(r.getAutoApplyEnabled());
     }
 
     private JobPreferencesResponse toResponse(JobPreferences p) {
@@ -103,6 +98,8 @@ public class JobPreferencesService {
                 .openToHybrid(p.getOpenToHybrid())
                 .openToRelocation(p.getOpenToRelocation())
                 .active(p.getActive())
+                .dailyApplyLimit(p.getDailyApplyLimit())
+                .autoApplyEnabled(p.getAutoApplyEnabled())
                 .createdAt(p.getCreatedAt())
                 .updatedAt(p.getUpdatedAt())
                 .build();

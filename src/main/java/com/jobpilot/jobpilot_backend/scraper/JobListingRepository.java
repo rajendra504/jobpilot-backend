@@ -29,4 +29,5 @@ public interface JobListingRepository extends JpaRepository<JobListing, Long> {
 
     Page<JobListing> findByUserIdAndStatusAndPortal(Long userId, String status,
                                                     String portal, Pageable pageable);
+
 }

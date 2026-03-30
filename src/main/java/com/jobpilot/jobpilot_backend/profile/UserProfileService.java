@@ -27,8 +27,6 @@ public class UserProfileService {
     private final UserProfileMapper     mapper;
     private final EncryptionService     encryptionService;
 
-    // ── Create ────────────────────────────────────────────────
-
     @Transactional
     public UserProfileResponse createProfile(Long userId, UserProfileRequest request) {
         if (profileRepository.existsByUserId(userId)) {
@@ -45,16 +43,12 @@ public class UserProfileService {
         return mapper.toResponse(saved, List.of());
     }
 
-    // ── Read ──────────────────────────────────────────────────
-
     @Transactional(readOnly = true)
     public UserProfileResponse getProfile(Long userId) {
         UserProfile profile = findProfile(userId);
         List<String> portals = extractConnectedPortalNames(profile.getPortalCredentialsJson());
         return mapper.toResponse(profile, portals);
     }
-
-    // ── Update (full replace) ─────────────────────────────────
 
     @Transactional
     public UserProfileResponse updateProfile(Long userId, UserProfileRequest request) {
@@ -67,8 +61,6 @@ public class UserProfileService {
         return mapper.toResponse(saved, portals);
     }
 
-    // ── Delete ────────────────────────────────────────────────
-
     @Transactional
     public void deleteProfile(Long userId) {
         UserProfile profile = findProfile(userId);
@@ -76,12 +68,6 @@ public class UserProfileService {
         log.info("Deleted profile for userId={}", userId);
     }
 
-    // ── Portal credentials ────────────────────────────────────
-
-    /**
-     * Saves or updates encrypted credentials for one portal.
-     * Existing credentials for other portals are preserved.
-     */
     @Transactional
     public UserProfileResponse savePortalCredential(Long userId, PortalCredentialDto dto) {
         UserProfile profile = findProfile(userId);
@@ -89,7 +75,6 @@ public class UserProfileService {
         Map<String, Map<String, String>> credMap =
                 mapper.parseCredentialsMap(profile.getPortalCredentialsJson());
 
-        // Mutable copy (parseCredentialsMap may return unmodifiable Collections.emptyMap)
         Map<String, Map<String, String>> mutableCredMap = new HashMap<>(credMap);
 
         String encryptedPassword = encryptionService.encrypt(dto.password());
@@ -109,12 +94,6 @@ public class UserProfileService {
         return mapper.toResponse(saved, portals);
     }
 
-    /**
-     * Removes credentials for a specific portal.
-     */
-    // ── REPLACE the removePortalCredential method in UserProfileService.java ──────
-// The fix: check if the portal key exists before removing. If not, throw 404.
-
     @Transactional
     public UserProfileResponse removePortalCredential(Long userId, String portal) {
         UserProfile profile = findProfile(userId);
@@ -124,7 +103,6 @@ public class UserProfileService {
 
         String normalizedPortal = portal.toLowerCase();
 
-        // ← THIS IS THE FIX: was silently succeeding before
         if (!credMap.containsKey(normalizedPortal)) {
             throw new ResourceNotFoundException(
                     "No credentials found for portal: " + portal +
@@ -143,12 +121,6 @@ public class UserProfileService {
         return mapper.toResponse(saved, portals);
     }
 
-    // ── Package-level: used by Application Runner in Module 7 ─
-
-    /**
-     * Returns decrypted credentials for a given portal.
-     * Only called internally — never exposed via a REST endpoint.
-     */
     public Map<String, String> getDecryptedCredentials(Long userId, String portal) {
         UserProfile profile = findProfile(userId);
 
@@ -166,8 +138,6 @@ public class UserProfileService {
         result.put("password", decryptedPassword);
         return result;
     }
-
-    // ── Internal helpers ──────────────────────────────────────
 
     private User findUser(Long userId) {
         return userRepository.findById(userId)

@@ -7,11 +7,6 @@ import lombok.NoArgsConstructor;
 
 import java.time.LocalDateTime;
 
-/**
- * Standard JSON wrapper for all API responses and errors.
- * Success: { success:true, message:"...", data:{...} }
- * Error:   { success:false, message:"...", data:null }
- */
 @Data
 @Builder
 @NoArgsConstructor

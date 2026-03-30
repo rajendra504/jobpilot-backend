@@ -10,44 +10,26 @@ import com.microsoft.playwright.options.Cookie;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
 
-/**
- * Manages browser session cookies for portal scraping.
- *
- * FLOW:
- * 1. User calls POST /api/sessions/init?portal=linkedin
- *    → Playwright opens a visible browser window
- *    → User logs in manually (handles OTP, CAPTCHA etc.)
- *    → After 60 seconds (or when we detect login), cookies are saved
- *    → Saved and encrypted in browser_sessions table
- *
- * 2. On every subsequent scrape:
- *    → loadIntoContext() injects the saved cookies before navigating
- *    → LinkedIn sees the same session — no OTP triggered
- *    → Session valid for 30 days (LinkedIn default) or until cookies expire
- */
 @Slf4j
 @Service
 @RequiredArgsConstructor
 public class BrowserSessionService {
 
-    private static final int SESSION_VALID_DAYS = 25;  // refresh 5 days before LinkedIn 30-day expiry
+    private static final int SESSION_VALID_DAYS = 25;
 
     private final BrowserSessionRepository sessionRepository;
     private final UserRepository           userRepository;
     private final EncryptionService        encryptionService;
     private final ObjectMapper             objectMapper;
 
-    /**
-     * Save all cookies from a BrowserContext into the DB.
-     * Called after manual login completes.
-     */
-    @Transactional
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void saveSession(Long userId, String portal, BrowserContext context) {
         List<Cookie> cookies = context.cookies();
 
@@ -59,33 +41,42 @@ public class BrowserSessionService {
         try {
             String cookiesJson   = objectMapper.writeValueAsString(cookies);
             String encryptedJson = encryptionService.encrypt(cookiesJson);
+            String normalizedPortal = portal.toLowerCase();
 
-            User user = userRepository.findById(userId)
-                    .orElseThrow(() -> new RuntimeException("User not found: " + userId));
+            Optional<BrowserSession> existing =
+                    sessionRepository.findByUserIdAndPortal(userId, normalizedPortal);
 
-            // Delete existing session for this portal (upsert pattern)
-            sessionRepository.deleteByUserIdAndPortal(userId, portal.toLowerCase());
+            BrowserSession session;
 
-            BrowserSession session = BrowserSession.builder()
-                    .user(user)
-                    .portal(portal.toLowerCase())
-                    .cookiesJson(encryptedJson)
-                    .expiresAt(LocalDateTime.now().plusDays(SESSION_VALID_DAYS))
-                    .build();
+            if (existing.isPresent()) {
+                // UPDATE in place — no duplicate key possible
+                session = existing.get();
+                session.setCookiesJson(encryptedJson);
+                session.setExpiresAt(LocalDateTime.now().plusDays(SESSION_VALID_DAYS));
+                // @UpdateTimestamp on updatedAt handles the timestamp automatically
+            } else {
+                // INSERT — only when row genuinely does not exist yet
+                User user = userRepository.findById(userId)
+                        .orElseThrow(() -> new RuntimeException("User not found: " + userId));
+
+                session = BrowserSession.builder()
+                        .user(user)
+                        .portal(normalizedPortal)
+                        .cookiesJson(encryptedJson)
+                        .expiresAt(LocalDateTime.now().plusDays(SESSION_VALID_DAYS))
+                        .build();
+            }
 
             sessionRepository.save(session);
             log.info("Saved {} cookies for portal={} userId={}", cookies.size(), portal, userId);
 
         } catch (Exception e) {
-            log.error("Failed to save browser session: {}", e.getMessage(), e);
+            // Do NOT rethrow — a failed cookie refresh must not abort the whole scrape
+            log.error("Failed to save browser session for portal={} userId={}: {}",
+                    portal, userId, e.getMessage(), e);
         }
     }
 
-    /**
-     * Load saved cookies into a BrowserContext.
-     * Call this BEFORE navigating to the portal — LinkedIn will recognise the session.
-     * Returns true if cookies were loaded, false if no valid session exists.
-     */
     @Transactional(readOnly = true)
     public boolean loadIntoContext(Long userId, String portal, BrowserContext context) {
         Optional<BrowserSession> sessionOpt =
@@ -99,7 +90,7 @@ public class BrowserSessionService {
         BrowserSession session = sessionOpt.get();
 
         if (session.isExpired()) {
-            log.info("Saved session expired for portal={} userId={} — needs re-login", portal, userId);
+            log.info("Session expired for portal={} userId={} — needs re-login", portal, userId);
             return false;
         }
 
@@ -107,17 +98,18 @@ public class BrowserSessionService {
             String decryptedJson = encryptionService.decrypt(session.getCookiesJson());
             List<Cookie> cookies = objectMapper.readValue(decryptedJson, new TypeReference<>() {});
             context.addCookies(cookies);
+            context.addInitScript(
+                    "Object.defineProperty(navigator, 'webdriver', {get: () => undefined});"
+            );
             log.info("Loaded {} cookies for portal={} userId={}", cookies.size(), portal, userId);
             return true;
         } catch (Exception e) {
-            log.error("Failed to load browser session cookies: {}", e.getMessage());
+            log.error("Failed to load session cookies for portal={} userId={}: {}",
+                    portal, userId, e.getMessage());
             return false;
         }
     }
 
-    /**
-     * Check if a valid non-expired session exists.
-     */
     @Transactional(readOnly = true)
     public boolean hasValidSession(Long userId, String portal) {
         return sessionRepository.findByUserIdAndPortal(userId, portal.toLowerCase())
@@ -125,10 +117,7 @@ public class BrowserSessionService {
                 .orElse(false);
     }
 
-    /**
-     * Delete a session (forces re-login on next scrape).
-     */
-    @Transactional
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void clearSession(Long userId, String portal) {
         sessionRepository.deleteByUserIdAndPortal(userId, portal.toLowerCase());
         log.info("Cleared session for portal={} userId={}", portal, userId);

@@ -8,12 +8,6 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
-/**
- * Public endpoints — no JWT required.
- *
- * POST /api/auth/register  → 201 Created  (RegisterResponse — no token)
- * POST /api/auth/login     → 200 OK       (LoginResponse — with token)
- */
 @RestController
 @RequestMapping("/auth")
 @RequiredArgsConstructor

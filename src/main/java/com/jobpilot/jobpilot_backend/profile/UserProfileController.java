@@ -13,27 +13,12 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
-/**
- * All endpoints require a valid JWT — Spring Security enforces this via SecurityConfig.
- * The logged-in user's ID is resolved from the JWT via @AuthenticationPrincipal.
- *
- * Base path: /api/users/profile
- *
- * POST   /api/users/profile                    → create profile
- * GET    /api/users/profile                    → get own profile
- * PUT    /api/users/profile                    → update profile
- * DELETE /api/users/profile                    → delete profile
- * POST   /api/users/profile/credentials        → save portal credential
- * DELETE /api/users/profile/credentials/{portal} → remove portal credential
- */
 @RestController
 @RequestMapping("/users/profile")
 @RequiredArgsConstructor
 public class UserProfileController {
 
     private final UserProfileService profileService;
-
-    // ── Create ────────────────────────────────────────────────
 
     @PostMapping
     public ResponseEntity<ApiResponse<UserProfileResponse>> createProfile(
@@ -46,8 +31,6 @@ public class UserProfileController {
                 .body(ApiResponse.success("Profile created successfully", response));
     }
 
-    // ── Read ──────────────────────────────────────────────────
-
     @GetMapping
     public ResponseEntity<ApiResponse<UserProfileResponse>> getProfile(
             @AuthenticationPrincipal UserPrincipal principal
@@ -55,8 +38,6 @@ public class UserProfileController {
         UserProfileResponse response = profileService.getProfile(principal.getId());
         return ResponseEntity.ok(ApiResponse.success("Profile retrieved", response));
     }
-
-    // ── Update ────────────────────────────────────────────────
 
     @PutMapping
     public ResponseEntity<ApiResponse<UserProfileResponse>> updateProfile(
@@ -67,8 +48,6 @@ public class UserProfileController {
         return ResponseEntity.ok(ApiResponse.success("Profile updated successfully", response));
     }
 
-    // ── Delete ────────────────────────────────────────────────
-
     @DeleteMapping
     public ResponseEntity<ApiResponse<Void>> deleteProfile(
             @AuthenticationPrincipal UserPrincipal principal
@@ -76,8 +55,6 @@ public class UserProfileController {
         profileService.deleteProfile(principal.getId());
         return ResponseEntity.ok(ApiResponse.success("Profile deleted successfully", null));
     }
-
-    // ── Portal credentials ────────────────────────────────────
 
     @PostMapping("/credentials")
     public ResponseEntity<ApiResponse<UserProfileResponse>> saveCredential(

@@ -30,13 +30,13 @@ public class JobListing {
     @Column(name = "portal", nullable = false, length = 50)
     private String portal;
 
-    @Column(name = "job_title", nullable = false)
+    @Column(name = "job_title", nullable = false, length = 255)
     private String jobTitle;
 
-    @Column(name = "company_name", nullable = false)
+    @Column(name = "company_name", nullable = false, length = 255)
     private String companyName;
 
-    @Column(name = "location")
+    @Column(name = "location", length = 300)
     private String location;
 
     @Column(name = "job_url", nullable = false, length = 1000)
@@ -58,9 +58,6 @@ public class JobListing {
     @Builder.Default
     private Boolean isEasyApply = false;
 
-    /**
-     * Lifecycle: NEW → APPLIED → REJECTED / INTERVIEW / OFFER
-     */
     @Column(name = "status", nullable = false, length = 30)
     @Builder.Default
     private String status = "NEW";

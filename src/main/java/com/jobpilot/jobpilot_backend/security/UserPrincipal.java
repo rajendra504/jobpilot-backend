@@ -9,15 +9,6 @@ import org.springframework.security.core.userdetails.UserDetails;
 import java.util.Collection;
 import java.util.List;
 
-/**
- * Adapter between our User entity and Spring Security's UserDetails contract.
- *
- * WHY this class exists:
- *  - User entity  = database concern only (fields, JPA mappings, persistence)
- *  - UserPrincipal = security concern only (authorities, credentials for Spring)
- *  - Separation means changing JPA annotations never touches security logic
- *  - Standard production pattern — User entity stays a plain @Entity
- */
 public class UserPrincipal implements UserDetails {
 
     @Getter private final Long id;
@@ -37,7 +28,6 @@ public class UserPrincipal implements UserDetails {
         this.active       = user.isActive();
     }
 
-    /** Factory method — only way to create a UserPrincipal */
     public static UserPrincipal of(User user) {
         return new UserPrincipal(user);
     }

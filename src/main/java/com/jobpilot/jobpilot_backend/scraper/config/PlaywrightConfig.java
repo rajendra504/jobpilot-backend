@@ -9,17 +9,6 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
-/**
- * Manages the Playwright browser lifecycle as a Spring singleton.
- *
- * A single Playwright + Browser instance is shared across all scraper calls.
- * Each scraping session creates a new BrowserContext (isolated tab session)
- * and closes it when done — so portal sessions never leak across users.
- *
- * Headless mode:
- *   - true  (default, production): no visible browser window — runs on Render server
- *   - false (set playwright.headless=false in dev): visible Chrome window for debugging
- */
 @Component
 @Slf4j
 public class PlaywrightConfig {
@@ -33,10 +22,6 @@ public class PlaywrightConfig {
     @Getter
     private Browser browser;
 
-    /**
-     * Lazily initializes Playwright + Browser on first use.
-     * Thread-safe via synchronized — scraper calls may come from @Scheduled + manual triggers.
-     */
     public synchronized Browser getBrowser() {
         if (browser == null || !browser.isConnected()) {
             log.info("Initializing Playwright browser (headless={})", headless);

@@ -17,10 +17,6 @@ public class JobPreferencesController {
 
     private final JobPreferencesService preferencesService;
 
-    /**
-     * POST /api/users/preferences
-     * Creates or fully replaces the job preferences for the authenticated user.
-     */
     @PostMapping
     public ResponseEntity<ApiResponse<JobPreferencesResponse>> saveOrUpdate(
             Authentication auth,
@@ -32,20 +28,13 @@ public class JobPreferencesController {
                 .body(ApiResponse.success("Job preferences saved successfully.", response));
     }
 
-    /**
-     * GET /api/users/preferences
-     * Returns the job preferences of the authenticated user.
-     */
+
     @GetMapping
     public ResponseEntity<ApiResponse<JobPreferencesResponse>> get(Authentication auth) {
         JobPreferencesResponse response = preferencesService.get(auth);
         return ResponseEntity.ok(ApiResponse.success("Job preferences retrieved.", response));
     }
 
-    /**
-     * DELETE /api/users/preferences
-     * Deletes the job preferences of the authenticated user.
-     */
     @DeleteMapping
     public ResponseEntity<ApiResponse<Void>> delete(Authentication auth) {
         preferencesService.delete(auth);

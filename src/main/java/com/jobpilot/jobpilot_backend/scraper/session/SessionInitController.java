@@ -39,25 +39,11 @@ public class SessionInitController {
     private final BrowserSessionService sessionService;
     private final PlaywrightConfig      playwrightConfig;
 
-    /**
-     * Holds the in-progress browser context per userId.
-     * ConcurrentHashMap guarantees thread-safe reads and writes.
-     */
     private final ConcurrentHashMap<Long, ActiveSession> pendingSessions
             = new ConcurrentHashMap<>();
 
-    /**
-     * Inner record — groups the context and portal together.
-     * A Java record is immutable and safe to share across threads.
-     */
     private record ActiveSession(BrowserContext context, String portal) {}
 
-    // ── POST /api/sessions/init?portal=linkedin ───────────────────────────────────
-
-    /**
-     * Opens a Chromium window for manual login.
-     * After logging in, call /confirm to save the cookies.
-     */
     @PostMapping("/init")
     public ResponseEntity<ApiResponse<Map<String, String>>> initSession(
             @AuthenticationPrincipal UserPrincipal principal,
@@ -66,21 +52,18 @@ public class SessionInitController {
         Long userId = principal.getId();
         log.info("Session init requested: portal={} userId={}", portal, userId);
 
-        // Close any previous pending session for this user
         closePendingSession(userId);
 
         Browser browser = playwrightConfig.getBrowser();
 
-        // Must be non-headless so the user can see and interact with the browser
         BrowserContext context = browser.newContext();
         Page page = context.newPage();
-        page.setDefaultTimeout(120_000);   // 2 minutes for manual interaction
+        page.setDefaultTimeout(120_000);
 
         String loginUrl = getLoginUrl(portal);
         page.navigate(loginUrl);
         page.waitForLoadState(LoadState.DOMCONTENTLOADED);
 
-        // Store in the shared map — visible to ALL threads immediately
         pendingSessions.put(userId, new ActiveSession(context, portal.toLowerCase()));
 
         log.info("Session stored in pendingSessions for userId={}. Map size={}",
@@ -105,12 +88,6 @@ public class SessionInitController {
         ));
     }
 
-    // ── POST /api/sessions/confirm?portal=linkedin ────────────────────────────────
-
-    /**
-     * Call this AFTER you have logged in in the Chromium window.
-     * Reads cookies from the open browser context and saves them to DB.
-     */
     @PostMapping("/confirm")
     public ResponseEntity<ApiResponse<Map<String, String>>> confirmSession(
             @AuthenticationPrincipal UserPrincipal principal,
@@ -120,7 +97,6 @@ public class SessionInitController {
         log.info("Session confirm requested: portal={} userId={}", portal, userId);
         log.info("Current pendingSessions map keys: {}", pendingSessions.keySet());
 
-        // Look up the pending session for this user
         ActiveSession pending = pendingSessions.get(userId);
 
         if (pending == null) {
@@ -140,10 +116,9 @@ public class SessionInitController {
         }
 
         try {
-            // Save all cookies from the open browser into the DB
+
             sessionService.saveSession(userId, portal, pending.context());
 
-            // Remove from pending map and close the browser context
             pendingSessions.remove(userId);
             try { pending.context().close(); } catch (Exception ignored) {}
 
@@ -165,11 +140,6 @@ public class SessionInitController {
         }
     }
 
-    // ── GET /api/sessions/status ──────────────────────────────────────────────────
-
-    /**
-     * Returns which portals have active saved sessions.
-     */
     @GetMapping("/status")
     public ResponseEntity<ApiResponse<Map<String, Object>>> getSessionStatus(
             @AuthenticationPrincipal UserPrincipal principal) {
@@ -188,11 +158,6 @@ public class SessionInitController {
         ));
     }
 
-    // ── DELETE /api/sessions/{portal} ─────────────────────────────────────────────
-
-    /**
-     * Clears a saved session — forces re-login on next scrape.
-     */
     @DeleteMapping("/{portal}")
     public ResponseEntity<ApiResponse<Void>> clearSession(
             @AuthenticationPrincipal UserPrincipal principal,
@@ -206,8 +171,6 @@ public class SessionInitController {
                 portal + " session cleared. You will be prompted to log in again on next scrape.",
                 null));
     }
-
-    // ── Private helpers ───────────────────────────────────────────────────────────
 
     private String getLoginUrl(String portal) {
         return switch (portal.toLowerCase()) {

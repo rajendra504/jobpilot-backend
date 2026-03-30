@@ -7,16 +7,6 @@ import org.hibernate.annotations.UpdateTimestamp;
 
 import java.time.LocalDateTime;
 
-/**
- * Persists Playwright browser cookies per user per portal.
- *
- * WHY: LinkedIn requires OTP/2FA on automated logins. Once the user
- * logs in manually (via /api/sessions/init endpoint), we save the
- * resulting cookies. Future scrapes reuse these cookies so LinkedIn
- * thinks it's the same browser session — no OTP triggered.
- *
- * Cookies are AES-256 encrypted before storage (same EncryptionService).
- */
 @Entity
 @Table(name = "browser_sessions")
 @Getter

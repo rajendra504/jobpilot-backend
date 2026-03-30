@@ -15,11 +15,6 @@ public class JobScraperController {
 
     private final JobScraperService scraperService;
 
-    /**
-     * POST /api/jobs/scrape
-     * Manually triggers a scrape for the authenticated user immediately.
-     * Runs synchronously — responds once scraping + saving is complete.
-     */
     @PostMapping("/scrape")
     public ResponseEntity<ApiResponse<JobScraperService.ScrapeResultSummary>> triggerScrape(
             Authentication auth) {
@@ -34,16 +29,6 @@ public class JobScraperController {
         return ResponseEntity.ok(ApiResponse.success(message, result));
     }
 
-    /**
-     * GET /api/jobs
-     * Returns paginated job listings for the authenticated user.
-     *
-     * Query params (all optional):
-     *   status  — filter by status: NEW, APPLIED, REJECTED, INTERVIEW, OFFER
-     *   portal  — filter by portal: linkedin, naukri
-     *   page    — page number (0-based, default 0)
-     *   size    — page size (default 20)
-     */
     @GetMapping
     public ResponseEntity<ApiResponse<Page<JobListingResponse>>> getListings(
             Authentication auth,
@@ -59,11 +44,6 @@ public class JobScraperController {
                 "Job listings retrieved. Total: " + listings.getTotalElements(), listings));
     }
 
-    /**
-     * PATCH /api/jobs/{id}/status
-     * Updates the status of a single job listing.
-     * Valid statuses: NEW, APPLIED, REJECTED, INTERVIEW, OFFER
-     */
     @PatchMapping("/{id}/status")
     public ResponseEntity<ApiResponse<JobListingResponse>> updateStatus(
             Authentication auth,

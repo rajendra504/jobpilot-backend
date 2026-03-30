@@ -25,7 +25,7 @@ public class UserProfile {
     @JoinColumn(name = "user_id", nullable = false, unique = true)
     private User user;
 
-    // ── Personal details ──────────────────────────────────────
+
     @Column(length = 20)
     private String phone;
 
@@ -44,7 +44,7 @@ public class UserProfile {
     @Column(columnDefinition = "TEXT")
     private String summary;
 
-    // ── JSON fields ───────────────────────────────────────────
+
     @Column(name = "skills_json", columnDefinition = "TEXT")
     private String skillsJson;
 
@@ -63,7 +63,7 @@ public class UserProfile {
     @Column(name = "portal_credentials_json", columnDefinition = "TEXT")
     private String portalCredentialsJson;
 
-    // ── Audit ─────────────────────────────────────────────────
+
     @CreationTimestamp
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;

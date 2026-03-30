@@ -7,12 +7,6 @@ import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.security.core.userdetails.UsernameNotFoundException;
 import org.springframework.stereotype.Service;
 
-/**
- * Loads a User from DB and wraps it in UserPrincipal.
- * This is the bridge Spring Security calls during authentication.
- * Injected into SecurityConfig directly — NOT into JwtAuthFilter
- * to avoid circular dependency.
- */
 @Service
 @RequiredArgsConstructor
 public class CustomUserDetailsService implements UserDetailsService {

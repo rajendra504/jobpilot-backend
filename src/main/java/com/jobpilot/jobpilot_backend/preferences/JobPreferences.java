@@ -38,9 +38,7 @@ public class JobPreferences {
     @Builder.Default
     private List<String> preferredLocations = new ArrayList<>();
 
-    /**
-     * Values: FULL_TIME, PART_TIME, CONTRACT, INTERNSHIP, FREELANCE
-     */
+
     @JdbcTypeCode(SqlTypes.JSON)
     @Column(name = "job_types", columnDefinition = "json")
     @Builder.Default
@@ -56,9 +54,7 @@ public class JobPreferences {
     @Builder.Default
     private String currency = "INR";
 
-    /**
-     * Values: FRESHER, JUNIOR, MID, SENIOR, LEAD, MANAGER
-     */
+
     @Column(name = "experience_level", length = 50)
     private String experienceLevel;
 
@@ -86,6 +82,26 @@ public class JobPreferences {
     @Column(name = "active")
     @Builder.Default
     private Boolean active = true;
+
+    /**
+     * Maximum number of job applications the runner will submit per day for this user.
+     * Default 10 — set lower (e.g. 3–5) while testing to avoid accidental bulk applies.
+     */
+    @Column(name = "daily_apply_limit")
+    @Builder.Default
+    private Integer dailyApplyLimit = 5;
+
+    /**
+     * Master on/off switch for the scheduled auto-apply runner.
+     * When false, runForAllAutoApplyUsers() skips this user entirely.
+     * User must explicitly enable this after reviewing scraped jobs.
+     */
+    @Column(name = "auto_apply_enabled")
+    @Builder.Default
+    private Boolean autoApplyEnabled = false;
+
+    // ─────────────────────────────────────────────────────────────────────────
+
 
     @Column(name = "created_at", updatable = false)
     private LocalDateTime createdAt;

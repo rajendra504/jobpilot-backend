@@ -25,14 +25,6 @@ import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 
 import java.util.List;
 
-/**
- * SecurityConfig injects:
- *  - JwtAuthFilter (which itself injects CustomUserDetailsService)
- *  - CustomUserDetailsService (for DaoAuthenticationProvider)
- *
- * NO circular dependency because:
- *  CustomUserDetailsService → UserRepository only (no back-reference to SecurityConfig)
- */
 @Configuration
 @EnableWebSecurity
 @EnableMethodSecurity

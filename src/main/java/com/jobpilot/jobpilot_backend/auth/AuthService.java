@@ -21,11 +21,6 @@ public class AuthService {
     private final JwtService           jwtService;
     private final AuthenticationManager authenticationManager;
 
-    /**
-     * Register a new user.
-     * Returns account info + success message — NO token.
-     * User must call /login separately to get their token.
-     */
     public RegisterResponse register(RegisterRequest request) {
         if (userRepository.existsByEmail(request.getEmail())) {
             throw new IllegalArgumentException(
@@ -50,11 +45,6 @@ public class AuthService {
                 .build();
     }
 
-    /**
-     * Authenticate user and return JWT token.
-     * AuthenticationManager throws BadCredentialsException automatically
-     * if email/password don't match — caught by GlobalExceptionHandler.
-     */
     public LoginResponse login(LoginRequest request) {
         authenticationManager.authenticate(
                 new UsernamePasswordAuthenticationToken(

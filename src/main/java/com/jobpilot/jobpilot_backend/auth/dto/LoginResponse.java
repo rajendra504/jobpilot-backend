@@ -5,11 +5,6 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
-/**
- * Returned after successful login.
- * Angular stores the token in memory (not localStorage)
- * and sends it as: Authorization: Bearer <token>
- */
 @Data
 @Builder
 @NoArgsConstructor

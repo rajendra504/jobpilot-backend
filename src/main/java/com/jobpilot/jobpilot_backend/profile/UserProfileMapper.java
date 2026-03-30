@@ -13,21 +13,12 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 
-/**
- * Handles conversion between the UserProfile entity (which stores collections as JSON strings)
- * and the typed DTOs the service layer works with.
- *
- * We use manual mapping here instead of MapStruct because the JSON parse/write logic
- * would need custom converters in MapStruct anyway — simpler to keep it explicit.
- */
 @Slf4j
 @Component
 @RequiredArgsConstructor
 public class UserProfileMapper {
 
     private final ObjectMapper objectMapper;
-
-    // ── Entity → Response DTO ─────────────────────────────────
 
     public UserProfileResponse toResponse(UserProfile profile, List<String> connectedPortals) {
         return new UserProfileResponse(
@@ -52,8 +43,6 @@ public class UserProfileMapper {
         );
     }
 
-    // ── Request DTO → Entity (for create) ────────────────────
-
     public UserProfile toEntity(UserProfileRequest request) {
         return UserProfile.builder()
                 .phone(request.phone())
@@ -70,8 +59,6 @@ public class UserProfileMapper {
                 .build();
     }
 
-    // ── Request DTO → existing Entity (for update / merge) ───
-
     public void mergeIntoEntity(UserProfileRequest request, UserProfile profile) {
         if (request.phone() != null)        profile.setPhone(request.phone());
         if (request.location() != null)     profile.setLocation(request.location());
@@ -85,8 +72,6 @@ public class UserProfileMapper {
         if (request.experience() != null)   profile.setExperienceJson(toJson(request.experience()));
         if (request.qaBank() != null)       profile.setQaBankJson(toJson(request.qaBank()));
     }
-
-    // ── JSON helpers ──────────────────────────────────────────
 
     public String toJson(Object obj) {
         if (obj == null) return null;
@@ -108,7 +93,6 @@ public class UserProfileMapper {
         }
     }
 
-    @SuppressWarnings("unchecked")
     public Map<String, Map<String, String>> parseCredentialsMap(String json) {
         if (json == null || json.isBlank()) return Collections.emptyMap();
         try {
@@ -118,8 +102,6 @@ public class UserProfileMapper {
             return Collections.emptyMap();
         }
     }
-
-    // ── Profile completeness score (0–100) ───────────────────
 
     private int calculateCompleteness(UserProfile p) {
         int score = 0;

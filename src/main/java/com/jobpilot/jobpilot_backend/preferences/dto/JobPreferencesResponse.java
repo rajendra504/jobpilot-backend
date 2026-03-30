@@ -32,6 +32,8 @@ public class JobPreferencesResponse {
     private Boolean openToRelocation;
 
     private Boolean active;
+    private Integer dailyApplyLimit;
+    private Boolean autoApplyEnabled;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 }

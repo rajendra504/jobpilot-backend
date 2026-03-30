@@ -13,12 +13,6 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.function.Function;
 
-/**
- * Handles all JWT operations:
- *  - generate token on login/register
- *  - extract claims (email, expiry)
- *  - validate token against UserDetails
- */
 @Service
 public class JwtService {
 

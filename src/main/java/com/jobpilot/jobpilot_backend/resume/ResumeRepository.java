@@ -24,4 +24,12 @@ public interface ResumeRepository extends JpaRepository<Resume, Long> {
     @Modifying
     @Query("UPDATE Resume r SET r.primary = false WHERE r.user.id = :userId")
     void clearPrimaryForUser(@Param("userId") Long userId);
+
+    @Query("""
+    SELECT r FROM Resume r 
+    WHERE r.user.id = :userId 
+      AND r.primary = true 
+    ORDER BY r.createdAt DESC
+""")
+    Optional<Resume> findActiveByUserId(@Param("userId") Long userId);
 }

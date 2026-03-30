@@ -15,17 +15,6 @@ import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
 
-/**
- * Intercepts every HTTP request once.
- * Reads the Authorization header, validates the JWT,
- * and sets authentication in the SecurityContext.
- *
- * CIRCULAR DEPENDENCY FIX:
- *  - JwtAuthFilter now injects CustomUserDetailsService directly (concrete class)
- *  - NOT the UserDetailsService interface bean from SecurityConfig
- *  - This breaks the cycle: SecurityConfig -> JwtAuthFilter -> CustomUserDetailsService
- *    (CustomUserDetailsService has no dependency back on SecurityConfig)
- */
 @Component
 @RequiredArgsConstructor
 public class JwtAuthFilter extends OncePerRequestFilter {

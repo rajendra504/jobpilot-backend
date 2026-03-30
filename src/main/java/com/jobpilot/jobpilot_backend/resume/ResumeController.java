@@ -14,23 +14,12 @@ import org.springframework.web.multipart.MultipartFile;
 import java.io.IOException;
 import java.util.List;
 
-/**
- * Base path: /api/resumes
- *
- * POST   /api/resumes/upload          → upload PDF or DOCX (multipart/form-data)
- * GET    /api/resumes                 → list all resumes for logged-in user
- * GET    /api/resumes/{id}            → get single resume metadata
- * PATCH  /api/resumes/{id}/primary    → set resume as primary (used for auto-apply)
- * DELETE /api/resumes/{id}            → delete resume (file + DB row)
- */
 @RestController
 @RequestMapping("/resumes")
 @RequiredArgsConstructor
 public class ResumeController {
 
     private final ResumeService resumeService;
-
-    // ── Upload ────────────────────────────────────────────────
 
     @PostMapping(value = "/upload", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ResponseEntity<ApiResponse<ResumeResponse>> upload(
@@ -43,8 +32,6 @@ public class ResumeController {
                 .body(ApiResponse.success("Resume uploaded successfully", response));
     }
 
-    // ── List all ──────────────────────────────────────────────
-
     @GetMapping
     public ResponseEntity<ApiResponse<List<ResumeResponse>>> list(
             @AuthenticationPrincipal UserPrincipal principal
@@ -52,8 +39,6 @@ public class ResumeController {
         List<ResumeResponse> resumes = resumeService.listResumes(principal.getId());
         return ResponseEntity.ok(ApiResponse.success("Resumes retrieved", resumes));
     }
-
-    // ── Get single ────────────────────────────────────────────
 
     @GetMapping("/{id}")
     public ResponseEntity<ApiResponse<ResumeResponse>> get(
@@ -64,8 +49,6 @@ public class ResumeController {
         return ResponseEntity.ok(ApiResponse.success("Resume retrieved", response));
     }
 
-    // ── Set primary ───────────────────────────────────────────
-
     @PatchMapping("/{id}/primary")
     public ResponseEntity<ApiResponse<ResumeResponse>> setPrimary(
             @AuthenticationPrincipal UserPrincipal principal,
@@ -74,8 +57,6 @@ public class ResumeController {
         ResumeResponse response = resumeService.setPrimary(principal.getId(), id);
         return ResponseEntity.ok(ApiResponse.success("Primary resume updated", response));
     }
-
-    // ── Delete ────────────────────────────────────────────────
 
     @DeleteMapping("/{id}")
     public ResponseEntity<ApiResponse<Void>> delete(

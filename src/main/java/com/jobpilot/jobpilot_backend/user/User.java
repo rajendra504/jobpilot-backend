@@ -5,11 +5,6 @@ import lombok.*;
 
 import java.time.LocalDateTime;
 
-/**
- * User entity — pure database concern.
- * NO UserDetails implementation here.
- * Spring Security interacts via UserPrincipal (see security package).
- */
 @Entity
 @Table(name = "users")
 @Getter
