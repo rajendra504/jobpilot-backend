@@ -19,12 +19,6 @@ public class ApplicationRunnerController {
 
     private final ApplicationRunnerService runnerService;
 
-    /**
-     * Manually triggers the full pipeline:
-     *   AI analysis → decision → Playwright apply → log results
-     * This runs synchronously and may take several minutes.
-     * In production, consider making this async.
-     */
     @PostMapping("/run")
     public ResponseEntity<ApiResponse<RunResult>> triggerRun(
             @AuthenticationPrincipal UserPrincipal principal

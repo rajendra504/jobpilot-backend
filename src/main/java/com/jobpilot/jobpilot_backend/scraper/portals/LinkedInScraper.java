@@ -5,12 +5,14 @@ import com.jobpilot.jobpilot_backend.scraper.PortalScraper;
 import com.jobpilot.jobpilot_backend.scraper.dto.ScrapedJobDto;
 import com.jobpilot.jobpilot_backend.scraper.util.StealthUtil;
 import com.microsoft.playwright.*;
-import com.microsoft.playwright.options.LoadState;
+import com.microsoft.playwright.options.WaitUntilState;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 @Slf4j
 @Component
@@ -18,284 +20,200 @@ public class LinkedInScraper implements PortalScraper {
 
     private static final String BASE_URL  = "https://www.linkedin.com";
     private static final String JOBS_URL  = BASE_URL + "/jobs/search/";
-    private static final int    MAX_PAGES = 3;  // 25 results/page → 75 max per role
-
-    // ─── Entry point ──────────────────────────────────────────────────────────
+    private static final int MAX_PAGES    = 1;
+    private static final int TIMEOUT_MS   = 60000;
 
     @Override
     public String portalKey() { return "linkedin"; }
 
     @Override
-    public List<ScrapedJobDto> scrape(Page page, String username,
-                                      String password, JobPreferences prefs) {
-
+    public List<ScrapedJobDto> scrape(Page page, String username, String password, JobPreferences prefs) {
         List<ScrapedJobDto> allJobs = new ArrayList<>();
+        page.setDefaultTimeout(TIMEOUT_MS);
+
+        log.info("[LinkedIn] Initializing Scraper...");
+        safeNavigate(page, BASE_URL);
+        StealthUtil.humanDelay(2000, 4000);
 
         List<String> roles = resolveRoles(prefs);
         String location    = resolveLocation(prefs);
 
-        log.info("[LinkedIn] Scraping {} role(s) in '{}'", roles.size(), location);
-
         for (String role : roles) {
-            log.info("[LinkedIn] → Role: '{}'", role);
-            scrapeRole(page, role.trim(), location.trim(), allJobs);
+            scrapeRole(page, role, location, allJobs);
             StealthUtil.humanDelay(4000, 7000);
         }
-
-        log.info("[LinkedIn] Total collected: {} jobs", allJobs.size());
         return allJobs;
     }
 
-    private void scrapeRole(Page page, String role, String location,
-                            List<ScrapedJobDto> sink) {
+    private void scrapeRole(Page page, String role, String location, List<ScrapedJobDto> sink) {
         for (int p = 0; p < MAX_PAGES; p++) {
+            int offset = p * 25;
+            String url = buildUrl(role, location, offset);
+            log.info("[LinkedIn] Scraping Role: {} | Page: {}", role, p + 1);
 
-            int    offset = p * 25;
-            String url    = buildListingUrl(role, location, offset);
+            if (!safeNavigate(page, url)) return;
+            if (isAuthWall(page)) return;
+            if (!waitForCards(page)) return;
 
-            log.info("[LinkedIn] Listing page {} → {}", p + 1, url);
-            page.navigate(url);
-
-            if (isAuthWall(page)) {
-                log.warn("[LinkedIn] Auth wall on page {} for '{}' — stopping", p + 1, role);
-                break;
-            }
-
-            if (!waitForListingCards(page)) {
-                log.warn("[LinkedIn] No cards on page {} for '{}' — stopping", p + 1, role);
-                break;
-            }
-
-            // Human simulation on listing page
             StealthUtil.slowScroll(page);
-            StealthUtil.humanDelay(1500, 3000);
+            List<ElementHandle> cards = page.querySelectorAll("div.job-card-container");
 
-            List<ElementHandle> cards = page.querySelectorAll(
-                    "ul.jobs-search-results__list li, div.job-card-container"
-            );
-
-            log.info("[LinkedIn] Page {} → {} cards for '{}'", p + 1, cards.size(), role);
-            if (cards.isEmpty()) break;
-
+            int scrapedCount = 0;
             for (ElementHandle card : cards) {
                 try {
                     ScrapedJobDto job = extractJob(page, card);
-                    if (job != null) sink.add(job);
-                } catch (Exception ignored) {}
-
-                StealthUtil.humanDelay(2500, 4500);
+                    if (job != null) {
+                        sink.add(job);
+                        scrapedCount++;
+                        if (scrapedCount >= 3) break; // TESTING LIMIT
+                    }
+                } catch (Exception e) {
+                    log.error("[LinkedIn] Error extracting job card: {}", e.getMessage());
+                }
+                StealthUtil.humanDelay(2000, 4000);
             }
-
-            StealthUtil.humanDelay(4000, 7000);
+            if (scrapedCount >= 3) break;
         }
     }
 
     private ScrapedJobDto extractJob(Page page, ElementHandle card) {
         try {
+            String title = textOf(card, "a.job-card-list__title", "a.job-card-container__link");
+            String company = textOf(card, ".artdeco-entity-lockup__subtitle", ".job-card-container__primary-description");
 
-            String title = textOf(card,
-                    "a.job-card-list__title--link",
-                    "a.job-card-list__title",
-                    "a.job-card-container__link",
-                    ".job-card-list__title");
-
-            String company = textOf(card,
-                    ".job-card-container__primary-description",
-                    ".artdeco-entity-lockup__subtitle",
-                    ".job-card-container__company-name");
-
-            String location = textOf(card,
+            // ✅ UPDATED LOCATION (taken from first method - card level, more reliable)
+            String locationVal = textOf(card,
                     ".job-card-container__metadata-item",
-                    ".job-card-container__metadata-wrapper li",
-                    ".artdeco-entity-lockup__caption");
+                    ".artdeco-entity-lockup__caption",
+                    "ul.job-card-container__metadata-wrapper li span",
+                    "span.job-search-card__location");
 
-            ElementHandle linkEl = card.querySelector(
-                    "a.job-card-list__title--link, " +
-                            "a.job-card-list__title, " +
-                            "a.job-card-container__link"
-            );
+            // Easy Apply (Logic preserved)
+            String cardText = card.innerText();
+            boolean isEasyApply = cardText != null && cardText.contains("Easy Apply");
+
+            ElementHandle linkEl = card.querySelector("a.job-card-list__title, a.job-card-container__link");
             String href = linkEl != null ? linkEl.getAttribute("href") : null;
+
             if (title == null || href == null) return null;
 
             String jobUrl = href.startsWith("http") ? href : BASE_URL + href;
-            if (jobUrl.contains("?")) jobUrl = jobUrl.substring(0, jobUrl.indexOf('?'));
-
-            boolean easyApply = false;
-            try { easyApply = card.innerText().contains("Easy Apply"); }
-            catch (Exception ignored) {}
 
             String description = "";
-            String experience  = null;
-            String salary      = null;
-            String jobType     = "Full-time";
+            String experience = null;
+            String salary = null;
 
             Page detail = null;
             try {
                 detail = page.context().newPage();
-                log.debug("[LinkedIn] Opening detail: {}", jobUrl);
 
-                detail.navigate(jobUrl);
-                detail.waitForLoadState(LoadState.DOMCONTENTLOADED);
-                StealthUtil.humanDelay(2500, 4000);
+                if (safeNavigate(detail, jobUrl)) {
+                    StealthUtil.humanDelay(3000, 5000);
 
-                // Scroll to trigger lazy-loaded content sections
-                detail.mouse().wheel(0, 600);
-                StealthUtil.humanDelay(800, 1500);
-                detail.mouse().wheel(0, 600);
-                StealthUtil.humanDelay(500, 1000);
+                    // Description
+                    ElementHandle descEl = detail.querySelector("[data-testid='expandable-text-box'], .jobs-description__content");
+                    description = (descEl != null) ? descEl.innerText() : "";
 
+                    // Salary & Experience (Insights)
+                    List<ElementHandle> insights = detail.querySelectorAll(".jobs-unified-top-card__job-insight, .jobs-description__job-insight-text");
 
-                description = coalesce(
-                        textFromPage(detail,
-                                "span[data-testid='expandable-text-box']"),
-                        textFromPage(detail,
-                                "div[data-testid='job-details-description']"),
-                        textFromPage(detail,
-                                ".jobs-description__content"),
-                        textFromPage(detail,
-                                ".description__text"),
-                        ""
-                );
+                    for (ElementHandle insight : insights) {
+                        String text = insight.innerText();
+                        if (text == null) continue;
 
-                experience = coalesce(
-                        textFromPage(detail,
-                                "li[data-testid='job-details-seniority-level'] span:last-child"),
-                        textFromPage(detail,
-                                "span[data-testid='job-details-seniority-level']"),
-                        textFromPage(detail,
-                                ".job-details-jobs-unified-top-card__job-insight span"),
-                        textFromPage(detail,
-                                ".jobs-unified-top-card__job-insight span")
-                );
+                        if (text.matches(".*[₹\\$]|LPA|CTC|Salary.*")) {
+                            salary = text.trim();
+                        }
 
-                salary = coalesce(
-                        textFromPage(detail,
-                                "li[data-testid='job-details-salary'] span:last-child"),
-                        textFromPage(detail,
-                                "span[data-testid='job-details-salary']"),
-                        textFromPage(detail,
-                                ".job-details-jobs-unified-top-card__salary-info"),
-                        textFromPage(detail,
-                                ".jobs-unified-top-card__salary-info")
-                );
+                        if (text.toLowerCase().contains("yr") ||
+                                text.toLowerCase().contains("year") ||
+                                text.toLowerCase().contains("experience")) {
+                            experience = text.trim();
+                        }
+                    }
 
-                String detailWorkplace = coalesce(
-                        textFromPage(detail,
-                                "li[data-testid='job-details-workplace-type'] span:last-child"),
-                        textFromPage(detail,
-                                "span[data-testid='job-details-workplace-type']"),
-                        textFromPage(detail,
-                                ".job-details-jobs-unified-top-card__workplace-type"),
-                        textFromPage(detail,
-                                ".jobs-unified-top-card__workplace-type")
-                );
-                if (detailWorkplace != null && !detailWorkplace.isBlank()) {
-                    jobType = clean(detailWorkplace);
+                    // Fallback using regex on description
+                    if (salary == null) {
+                        salary = regexSearch(description, "(?i)salary[:\\s]+([^\\n]+)");
+                    }
+
+                    if (experience == null) {
+                        experience = regexSearch(description, "(?i)(\\d+\\+?\\s*(?:-|to)?\\s*\\d*\\s*years?)");
+                    }
+
+                    if (locationVal == null) {
+                        locationVal = "Not specified";
+                    }
                 }
 
-            } catch (Exception e) {
-                log.debug("[LinkedIn] Detail page error for {}: {}", jobUrl, e.getMessage());
             } finally {
-                if (detail != null) {
-                    try { detail.close(); } catch (Exception ignored) {}
-                }
+                if (detail != null) detail.close();
             }
 
             return ScrapedJobDto.builder()
                     .portal("linkedin")
                     .jobTitle(clean(title))
-                    .companyName(clean(company != null ? company : "Unknown"))
-                    .location(clean(location))
+                    .companyName(clean(company))
+                    .location(clean(locationVal)) //
                     .salaryRange(clean(salary))
                     .experienceRequired(clean(experience))
                     .jobUrl(jobUrl)
-                    .jobType(jobType)
-                    .isEasyApply(easyApply)
+                    .jobType("Full-time")
+                    .isEasyApply(isEasyApply)
                     .description(clean(description))
                     .build();
 
         } catch (Exception e) {
-            log.debug("[LinkedIn] Card extraction error: {}", e.getMessage());
             return null;
         }
     }
 
-    // ─── Helpers ──────────────────────────────────────────────────────────────
+    private String regexSearch(String text, String patternStr) {
+        if (text == null) return null;
+        Pattern pattern = Pattern.compile(patternStr);
+        Matcher matcher = pattern.matcher(text);
+        return matcher.find() ? matcher.group(1).trim() : null;
+    }
 
-    private String buildListingUrl(String role, String location, int start) {
+    private boolean safeNavigate(Page page, String url) {
         try {
-            String r = java.net.URLEncoder.encode(role, "UTF-8");
-            String l = java.net.URLEncoder.encode(location, "UTF-8");
-            return JOBS_URL + "?keywords=" + r + "&location=" + l + "&start=" + start;
-        } catch (Exception e) {
-            return JOBS_URL + "?keywords=java+developer&location=Hyderabad&start=" + start;
-        }
+            page.navigate(url, new Page.NavigateOptions().setWaitUntil(WaitUntilState.DOMCONTENTLOADED).setTimeout(TIMEOUT_MS));
+            return true;
+        } catch (Exception e) { return false; }
+    }
+
+    private boolean waitForCards(Page page) {
+        try {
+            page.waitForSelector("div.job-card-container", new Page.WaitForSelectorOptions().setTimeout(15000));
+            return true;
+        } catch (Exception e) { return false; }
     }
 
     private boolean isAuthWall(Page page) {
-        String url = page.url();
-        return url.contains("/login")
-                || url.contains("/authwall")
-                || url.contains("/checkpoint")
-                || url.contains("/uas/");
+        return page.url().contains("login") || page.url().contains("checkpoint");
     }
 
-    private boolean waitForListingCards(Page page) {
+    private String buildUrl(String role, String location, int start) {
         try {
-            page.waitForSelector(
-                    "ul.jobs-search-results__list li, div.job-card-container",
-                    new Page.WaitForSelectorOptions().setTimeout(10_000)
-            );
-            return true;
-        } catch (Exception e) {
-            return false;
-        }
+            return JOBS_URL + "?keywords=" + java.net.URLEncoder.encode(role, "UTF-8")
+                    + "&location=" + java.net.URLEncoder.encode(location, "UTF-8") + "&start=" + start;
+        } catch (Exception e) { return JOBS_URL; }
     }
 
     private String textOf(ElementHandle root, String... selectors) {
         for (String sel : selectors) {
-            try {
-                ElementHandle el = root.querySelector(sel);
-                if (el != null) {
-                    String txt = el.textContent();
-                    if (txt != null && !txt.isBlank()) return txt.trim();
-                }
-            } catch (Exception ignored) {}
+            ElementHandle el = root.querySelector(sel);
+            if (el != null) return el.textContent().trim();
         }
         return null;
     }
 
-    private String textFromPage(Page page, String selector) {
-        try {
-            ElementHandle el = page.querySelector(selector);
-            if (el != null) {
-                String txt = el.textContent();
-                if (txt != null && !txt.isBlank()) return txt.trim();
-            }
-        } catch (Exception ignored) {}
-        return null;
-    }
-
-    @SafeVarargs
-    private <T extends String> T coalesce(T... values) {
-        for (T v : values) if (v != null && !v.isBlank()) return v;
-        return null;
-    }
-
     private List<String> resolveRoles(JobPreferences prefs) {
-        if (prefs.getDesiredRoles() == null || prefs.getDesiredRoles().isEmpty())
-            return List.of("java developer");
-        List<String> roles = prefs.getDesiredRoles().stream()
-                .filter(r -> r != null && !r.isBlank())
-                .toList();
-        return roles.isEmpty() ? List.of("java developer") : roles;
+        return (prefs.getDesiredRoles() == null || prefs.getDesiredRoles().isEmpty()) ? List.of("java developer") : prefs.getDesiredRoles();
     }
 
     private String resolveLocation(JobPreferences prefs) {
-        if (prefs.getPreferredLocations() == null || prefs.getPreferredLocations().isEmpty())
-            return "Hyderabad";
-        String loc = prefs.getPreferredLocations().get(0);
-        return (loc == null || loc.isBlank()) ? "Hyderabad" : loc.trim();
+        return (prefs.getPreferredLocations() == null || prefs.getPreferredLocations().isEmpty()) ? "Hyderabad" : prefs.getPreferredLocations().get(0);
     }
 
     private String clean(String s) {

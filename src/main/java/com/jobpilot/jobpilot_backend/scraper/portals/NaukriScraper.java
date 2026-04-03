@@ -20,11 +20,11 @@ import java.util.List;
  * Description       : fetched from each job detail page.
  *
  * SALARY/EXPERIENCE FIX:
- *   Naukri cards render experience and salary as SEPARATE <li> elements inside
- *   a <ul class="tags-gt"> list — NOT as a combined string.
- *   The old .salary selector was matching a wrapper that contained both, causing
- *   experience to bleed into salaryRange.
- *   Fix: target each <li> individually by position or by icon data-testid.
+ * Naukri cards render experience and salary as SEPARATE <li> elements inside
+ * a <ul class="tags-gt"> list — NOT as a combined string.
+ * The old .salary selector was matching a wrapper that contained both, causing
+ * experience to bleed into salaryRange.
+ * Fix: target each <li> individually by position or by icon data-testid.
  *
  * Human simulation  : slow scroll on listing pages + per-job delay on detail tabs.
  * Anti-block        : home-page warm-up, waitForCards() guard, tab always closed in finally.
@@ -34,7 +34,7 @@ import java.util.List;
 public class NaukriScraper implements PortalScraper {
 
     private static final String BASE_URL   = "https://www.naukri.com";
-    private static final int    MAX_PAGES  = 3;
+    private static final int    MAX_PAGES  = 1;
     private static final int    TIMEOUT_MS = 60_000;
 
     // ─── Entry point ──────────────────────────────────────────────────────────
@@ -73,6 +73,9 @@ public class NaukriScraper implements PortalScraper {
 
     // ─── Per-role listing loop ────────────────────────────────────────────────
 
+    /* ================================================================================
+    OLD CODE (Commented out for production use later)
+    ================================================================================
     private void scrapeRole(Page page, String role, String location,
                             List<ScrapedJobDto> sink) {
 
@@ -130,6 +133,85 @@ public class NaukriScraper implements PortalScraper {
             StealthUtil.humanDelay(3000, 5000);
         }
     }
+    ================================================================================
+    */
+
+    // ================================================================================
+    // NEW CODE (Testing Limit: 3 jobs per role)
+    // ================================================================================
+    private void scrapeRole(Page page, String role, String location,
+                            List<ScrapedJobDto> sink) {
+
+        String searchUrl = buildSearchUrl(role, location);
+        log.info("[Naukri] Search URL: {}", searchUrl);
+
+        page.navigate(searchUrl);
+        page.waitForLoadState(LoadState.DOMCONTENTLOADED);
+
+        if (!waitForCards(page)) {
+            log.error("[Naukri] No cards found for '{}' — blocked or structure changed", role);
+            return;
+        }
+
+        StealthUtil.humanDelay(2000, 4000);
+
+        int scrapedCount = 0; // Added counter for testing limits
+
+        for (int p = 0; p < MAX_PAGES; p++) {
+
+            log.info("[Naukri] Scraping listing page {} for '{}'", p + 1, role);
+
+            StealthUtil.slowScroll(page);
+            StealthUtil.humanDelay(1500, 3000);
+
+            List<ElementHandle> cards = page.querySelectorAll(
+                    "div.jobTuple, article.jobTuple, .cust-job-tuple"
+            );
+
+            log.info("[Naukri] Page {} → {} cards for '{}'", p + 1, cards.size(), role);
+            if (cards.isEmpty()) break;
+
+            for (ElementHandle card : cards) {
+                try {
+                    ScrapedJobDto job = extractJob(page, card);
+                    if (job != null) {
+                        sink.add(job);
+                        scrapedCount++; // Increment test counter
+
+                        // Limit to 3 jobs for testing purposes
+                        if (scrapedCount >= 3) {
+                            log.info("[Naukri] Testing limit reached: 3 jobs for role '{}'", role);
+                            break;
+                        }
+                    }
+                } catch (Exception ignored) {}
+
+                StealthUtil.humanDelay(1500, 3000);
+            }
+
+            // Break out of pagination loop if we hit the limit
+            if (scrapedCount >= 3) {
+                break;
+            }
+
+            ElementHandle nextBtn = page.querySelector("a.fright, a[title='Next']");
+            if (nextBtn == null) {
+                log.info("[Naukri] No next button — end of results for '{}'", role);
+                break;
+            }
+
+            nextBtn.click();
+            page.waitForLoadState(LoadState.DOMCONTENTLOADED);
+
+            if (!waitForCards(page)) {
+                log.warn("[Naukri] Cards not found after Next click — stopping");
+                break;
+            }
+
+            StealthUtil.humanDelay(3000, 5000);
+        }
+    }
+    // ================================================================================
 
     // ─── Card + detail page extraction ───────────────────────────────────────
 
@@ -145,8 +227,6 @@ public class NaukriScraper implements PortalScraper {
             String loc = textOf(card, ".locWdth");
 
             // ── EXPERIENCE — TARGET THE SPECIFIC LI, NOT THE WRAPPER ──────────
-            // Naukri renders: <ul class="tags-gt"><li>3-8 Yrs</li><li>₹24-28 LPA</li></ul>
-            // .exp targets the experience <li> specifically — avoids salary bleed
             String exp = textOf(card,
                     ".exp",                        // primary: dedicated experience element
                     ".experience",
@@ -155,7 +235,6 @@ public class NaukriScraper implements PortalScraper {
             );
 
             // ── SALARY — TARGET THE SPECIFIC LI, NOT THE WRAPPER ─────────────
-            // .salary targets the salary <li> specifically — avoids experience bleed
             String salary = textOf(card,
                     ".sal",                         // primary: dedicated salary element
                     ".salary",
@@ -164,21 +243,17 @@ public class NaukriScraper implements PortalScraper {
             );
 
             // ── Safety net: if they're the same string, one selector hit the wrapper ──
-            // Split on " | " which Naukri uses to join them in some card variants
             if (exp != null && salary != null && exp.equals(salary)) {
                 String[] parts = exp.split("\\|");
                 if (parts.length >= 2) {
                     exp    = parts[0].trim();
                     salary = parts[1].trim();
                 } else {
-                    // Can't split — keep exp, null the salary (better than duplicating)
                     salary = null;
                 }
             }
 
             // ── Additional safety: if exp looks like a salary, swap them ──────
-            // Salary always contains currency symbols or "LPA"/"CTC"/"PA"
-            // Experience always contains "Yr" or "year" (case-insensitive)
             if (exp != null && looksLikeSalary(exp) && (salary == null || salary.isBlank())) {
                 salary = exp;
                 exp    = null;
@@ -223,7 +298,6 @@ public class NaukriScraper implements PortalScraper {
                             textFromPage(detail, ".salary"),
                             textFromPage(detail, "[class*='sal']")
                     );
-                    // Only use if it doesn't look like experience
                     if (detailSalary != null && !looksLikeExperience(detailSalary)) {
                         salary = detailSalary;
                     }
@@ -258,10 +332,6 @@ public class NaukriScraper implements PortalScraper {
 
     // ─── Classification helpers ───────────────────────────────────────────────
 
-    /**
-     * Returns true if the string looks like a salary value.
-     * Examples: "₹24-28 LPA", "Not Disclosed", "12-18 Lakh", "24,00,000 PA"
-     */
     private boolean looksLikeSalary(String s) {
         if (s == null) return false;
         String lower = s.toLowerCase();
@@ -275,10 +345,6 @@ public class NaukriScraper implements PortalScraper {
                 || lower.contains("salary");
     }
 
-    /**
-     * Returns true if the string looks like an experience value.
-     * Examples: "3-8 Yrs", "5+ Years", "Fresher", "0-1 Year"
-     */
     private boolean looksLikeExperience(String s) {
         if (s == null) return false;
         String lower = s.toLowerCase();

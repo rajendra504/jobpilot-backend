@@ -31,26 +31,26 @@ public class AiAnalysis {
 
 
     @Column(name = "match_score", nullable = false)
-    private int matchScore;                         // 0–100
+    private int matchScore;
 
     @Column(name = "decision", nullable = false, length = 10)
-    private String decision;                        // "APPLY" | "SKIP"
+    private String decision;
 
     @Column(name = "decision_reason", columnDefinition = "TEXT")
     private String decisionReason;
 
     @Column(name = "missing_skills_json", columnDefinition = "TEXT")
-    private String missingSkillsJson;               // JSON array: ["Kafka","Docker"]
+    private String missingSkillsJson;
 
 
     @Column(name = "cover_letter", columnDefinition = "LONGTEXT")
     private String coverLetter;
 
     @Column(name = "resume_snippet", columnDefinition = "TEXT")
-    private String resumeSnippet;                   // 3–5 optimised bullet points
+    private String resumeSnippet;
 
     @Column(name = "application_answers_json", columnDefinition = "TEXT")
-    private String applicationAnswersJson;          // [{question, answer}, ...]
+    private String applicationAnswersJson;
 
 
     @Column(name = "prompt_tokens_used")
@@ -59,7 +59,7 @@ public class AiAnalysis {
 
     @Column(name = "status", nullable = false, length = 20)
     @Builder.Default
-    private String status = "PENDING";              // PENDING | DONE | FAILED
+    private String status = "PENDING";
 
     @Column(name = "error_message", columnDefinition = "TEXT")
     private String errorMessage;

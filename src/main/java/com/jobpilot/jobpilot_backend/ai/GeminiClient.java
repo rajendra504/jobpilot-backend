@@ -15,7 +15,6 @@ import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.util.List;
 
-
 @Slf4j
 @Component
 @RequiredArgsConstructor
@@ -27,7 +26,7 @@ public class GeminiClient {
     @Value("${app.gemini.api-key}")
     private String apiKey;
 
-    @Value("${app.gemini.model:gemini-2.5-flash}")
+    @Value("${app.gemini.model:gemini-1.5-flash}") // Ensure you are using a stable model version
     private String model;
 
     private final ObjectMapper objectMapper;
@@ -44,9 +43,9 @@ public class GeminiClient {
                                 .build()
                 ))
                 .generationConfig(GenerationConfig.builder()
-                        .temperature(0.3)
-                        .maxOutputTokens(2000)
-                        .responseMimeType("application/json")   // forces structured JSON output
+                        .temperature(0.2) // Slightly lower temperature for more consistent JSON
+                        .maxOutputTokens(4096) // INCREASED: Prevents truncation
+                        .responseMimeType("application/json")
                         .build())
                 .build();
 
@@ -65,8 +64,7 @@ public class GeminiClient {
 
             if (response.statusCode() != 200) {
                 log.error("Gemini API error: status={} body={}", response.statusCode(), response.body());
-                throw new GeminiException("Gemini API returned HTTP " + response.statusCode()
-                        + ": " + response.body());
+                throw new GeminiException("Gemini API returned HTTP " + response.statusCode());
             }
 
             GeminiResponse geminiResponse =
@@ -78,9 +76,12 @@ public class GeminiClient {
 
             Candidate candidate = geminiResponse.getCandidates().get(0);
 
-            if (candidate.getContent() == null
-                    || candidate.getContent().getParts() == null
-                    || candidate.getContent().getParts().isEmpty()) {
+            // Log finish reason for debugging truncation
+            if (candidate.getFinishReason() != null && !candidate.getFinishReason().equalsIgnoreCase("STOP")) {
+                log.warn("[Gemini] Warning: Generation finished with reason: {}", candidate.getFinishReason());
+            }
+
+            if (candidate.getContent() == null || candidate.getContent().getParts() == null || candidate.getContent().getParts().isEmpty()) {
                 throw new GeminiException("Gemini candidate has no content parts");
             }
 
@@ -88,10 +89,6 @@ public class GeminiClient {
 
             if (text == null || text.isBlank()) {
                 throw new GeminiException("Gemini returned empty text content");
-            }
-
-            if (geminiResponse.getUsageMetadata() != null) {
-                log.info("[Gemini] Tokens used: {}", geminiResponse.getUsageMetadata().getTotalTokenCount());
             }
 
             return text.trim();
@@ -106,55 +103,39 @@ public class GeminiClient {
     public AnalysisResult sendAndParse(String prompt) throws GeminiException {
         String rawJson = sendPrompt(prompt);
 
+        // REFINED CLEANING: Only remove markdown wrappers if present.
+        // Do NOT replace all whitespace/newlines as it can break JSON string values.
         String cleaned = rawJson
                 .replaceAll("^```json\\s*", "")
                 .replaceAll("^```\\s*", "")
                 .replaceAll("```\\s*$", "")
-                .replaceAll("[\\r\\n]+", " ")
-                .replaceAll("\\s+", " ")
                 .trim();
 
         try {
             return objectMapper.readValue(cleaned, AnalysisResult.class);
-
         } catch (Exception e) {
+            log.error("[Gemini] Parse failed. Error: {}", e.getMessage());
+            log.error("[Gemini RAW Snippet (End)]: {}", cleaned.substring(Math.max(0, cleaned.length() - 100)));
 
-            log.error("[Gemini] Initial parse failed. Attempting repair...");
-            log.error("[Gemini RAW]: {}", cleaned);
-
-            try {
-
-                String repaired = cleaned
-                        .replaceAll(",\\s*]", "]")        // remove trailing commas
-                        .replaceAll("\\[\\s*,", "[")      // remove leading commas
-                        .replaceAll(",\\s*,", ",")        // double commas fix
-                        .replaceAll("\"\\s*\"", "\"\"");  // fix empty broken strings
-
-                return objectMapper.readValue(repaired, AnalysisResult.class);
-
-            } catch (Exception ex) {
-                log.error("[Gemini] Repair also failed.");
-
-                return fallbackResult();
-            }
+            // If the JSON is still truncated, we return the fallback 0-score result
+            return fallbackResult();
         }
     }
+
     private AnalysisResult fallbackResult() {
-        AnalysisResult result = new AnalysisResult();
-
-        result.setMatchScore(0);
-        result.setDecision("SKIP");
-        result.setDecisionReason("AI parsing failed");
-        result.setMissingSkills(List.of());
-        result.setCoverLetter("");
-        result.setResumeSnippet("");
-        result.setApplicationAnswers(List.of());
-
-        return result;
+        return AnalysisResult.builder()
+                .matchScore(0)
+                .decision("SKIP")
+                .decisionReason("AI parsing failed (Truncated JSON)")
+                .missingSkills(List.of())
+                .coverLetter("")
+                .resumeSnippet("")
+                .applicationAnswers(List.of())
+                .build();
     }
 
     public static class GeminiException extends Exception {
-        public GeminiException(String message)                  { super(message); }
+        public GeminiException(String message) { super(message); }
         public GeminiException(String message, Throwable cause) { super(message, cause); }
     }
 }

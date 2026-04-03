@@ -2,13 +2,18 @@ package com.jobpilot.jobpilot_backend.ai.dto;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
+import lombok.AllArgsConstructor;
+import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
+import org.checkerframework.common.value.qual.ArrayLen;
 
 import java.util.List;
 
 @Data
+@Builder
 @NoArgsConstructor
+@AllArgsConstructor
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class AnalysisResult {
 
@@ -34,7 +39,9 @@ public class AnalysisResult {
     private List<ApplicationAnswer> applicationAnswers;
 
     @Data
+    @Builder
     @NoArgsConstructor
+    @AllArgsConstructor
     @JsonIgnoreProperties(ignoreUnknown = true)
     public static class ApplicationAnswer {
         @JsonProperty("question")
