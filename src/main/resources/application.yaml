@@ -59,7 +59,7 @@ app:
   upload:
     resume-dir: ${RESUME_UPLOAD_DIR:uploads/resumes}
   playwright:
-    headless: false
+    headless: true
   scraper:
     cron: "0 30 1 * * *"
   runner:

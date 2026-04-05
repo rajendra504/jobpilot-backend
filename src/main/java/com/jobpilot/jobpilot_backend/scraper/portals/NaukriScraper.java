@@ -12,32 +12,14 @@ import org.springframework.stereotype.Component;
 import java.util.ArrayList;
 import java.util.List;
 
-/**
- * Naukri.com job scraper.
- *
- * Session strategy  : cookies injected into BrowserContext by JobScraperService BEFORE this runs.
- * Pagination engine : Next-button click — Naukri uses server-side pagination.
- * Description       : fetched from each job detail page.
- *
- * SALARY/EXPERIENCE FIX:
- * Naukri cards render experience and salary as SEPARATE <li> elements inside
- * a <ul class="tags-gt"> list — NOT as a combined string.
- * The old .salary selector was matching a wrapper that contained both, causing
- * experience to bleed into salaryRange.
- * Fix: target each <li> individually by position or by icon data-testid.
- *
- * Human simulation  : slow scroll on listing pages + per-job delay on detail tabs.
- * Anti-block        : home-page warm-up, waitForCards() guard, tab always closed in finally.
- */
+
 @Slf4j
 @Component
 public class NaukriScraper implements PortalScraper {
 
     private static final String BASE_URL   = "https://www.naukri.com";
-    private static final int    MAX_PAGES  = 1;
+    private static final int    MAX_PAGES  = 3;
     private static final int    TIMEOUT_MS = 60_000;
-
-    // ─── Entry point ──────────────────────────────────────────────────────────
 
     @Override
     public String portalKey() { return "naukri"; }
@@ -50,7 +32,7 @@ public class NaukriScraper implements PortalScraper {
 
         page.setDefaultTimeout(TIMEOUT_MS);
 
-        // Warm-up: home page first — establishes cookies, avoids cold-start block
+        // Warm-up: establishes cookies and avoids cold-start block
         log.info("[Naukri] Warming up via home page");
         page.navigate(BASE_URL);
         page.waitForLoadState(LoadState.DOMCONTENTLOADED);
@@ -64,18 +46,13 @@ public class NaukriScraper implements PortalScraper {
         for (String role : roles) {
             log.info("[Naukri] → Role: '{}'", role);
             scrapeRole(page, role.trim(), location.trim(), allJobs);
-            StealthUtil.humanDelay(4000, 7000); // human gap between role searches
+            StealthUtil.humanDelay(4000, 7000);
         }
 
         log.info("[Naukri] Total collected: {} jobs", allJobs.size());
         return allJobs;
     }
 
-    // ─── Per-role listing loop ────────────────────────────────────────────────
-
-    /* ================================================================================
-    OLD CODE (Commented out for production use later)
-    ================================================================================
     private void scrapeRole(Page page, String role, String location,
                             List<ScrapedJobDto> sink) {
 
@@ -112,10 +89,11 @@ public class NaukriScraper implements PortalScraper {
                     if (job != null) sink.add(job);
                 } catch (Exception ignored) {}
 
-                // Per-job delay — rapid tab opens look like a bot
+                // Standard delay between processing cards
                 StealthUtil.humanDelay(1500, 3000);
             }
 
+            // Pagination logic
             ElementHandle nextBtn = page.querySelector("a.fright, a[title='Next']");
             if (nextBtn == null) {
                 log.info("[Naukri] No next button — end of results for '{}'", role);
@@ -133,116 +111,28 @@ public class NaukriScraper implements PortalScraper {
             StealthUtil.humanDelay(3000, 5000);
         }
     }
-    ================================================================================
-    */
-
-    // ================================================================================
-    // NEW CODE (Testing Limit: 3 jobs per role)
-    // ================================================================================
-    private void scrapeRole(Page page, String role, String location,
-                            List<ScrapedJobDto> sink) {
-
-        String searchUrl = buildSearchUrl(role, location);
-        log.info("[Naukri] Search URL: {}", searchUrl);
-
-        page.navigate(searchUrl);
-        page.waitForLoadState(LoadState.DOMCONTENTLOADED);
-
-        if (!waitForCards(page)) {
-            log.error("[Naukri] No cards found for '{}' — blocked or structure changed", role);
-            return;
-        }
-
-        StealthUtil.humanDelay(2000, 4000);
-
-        int scrapedCount = 0; // Added counter for testing limits
-
-        for (int p = 0; p < MAX_PAGES; p++) {
-
-            log.info("[Naukri] Scraping listing page {} for '{}'", p + 1, role);
-
-            StealthUtil.slowScroll(page);
-            StealthUtil.humanDelay(1500, 3000);
-
-            List<ElementHandle> cards = page.querySelectorAll(
-                    "div.jobTuple, article.jobTuple, .cust-job-tuple"
-            );
-
-            log.info("[Naukri] Page {} → {} cards for '{}'", p + 1, cards.size(), role);
-            if (cards.isEmpty()) break;
-
-            for (ElementHandle card : cards) {
-                try {
-                    ScrapedJobDto job = extractJob(page, card);
-                    if (job != null) {
-                        sink.add(job);
-                        scrapedCount++; // Increment test counter
-
-                        // Limit to 3 jobs for testing purposes
-                        if (scrapedCount >= 3) {
-                            log.info("[Naukri] Testing limit reached: 3 jobs for role '{}'", role);
-                            break;
-                        }
-                    }
-                } catch (Exception ignored) {}
-
-                StealthUtil.humanDelay(1500, 3000);
-            }
-
-            // Break out of pagination loop if we hit the limit
-            if (scrapedCount >= 3) {
-                break;
-            }
-
-            ElementHandle nextBtn = page.querySelector("a.fright, a[title='Next']");
-            if (nextBtn == null) {
-                log.info("[Naukri] No next button — end of results for '{}'", role);
-                break;
-            }
-
-            nextBtn.click();
-            page.waitForLoadState(LoadState.DOMCONTENTLOADED);
-
-            if (!waitForCards(page)) {
-                log.warn("[Naukri] Cards not found after Next click — stopping");
-                break;
-            }
-
-            StealthUtil.humanDelay(3000, 5000);
-        }
-    }
-    // ================================================================================
-
-    // ─── Card + detail page extraction ───────────────────────────────────────
 
     private ScrapedJobDto extractJob(Page page, ElementHandle card) {
         try {
-            // ── Title ─────────────────────────────────────────────────────────
             String title = textOf(card, "a.title", "a.jobTitle");
-
-            // ── Company ───────────────────────────────────────────────────────
             String company = textOf(card, ".comp-name");
-
-            // ── Location ──────────────────────────────────────────────────────
             String loc = textOf(card, ".locWdth");
 
-            // ── EXPERIENCE — TARGET THE SPECIFIC LI, NOT THE WRAPPER ──────────
             String exp = textOf(card,
-                    ".exp",                        // primary: dedicated experience element
+                    ".exp",
                     ".experience",
                     "li.exp",
                     "[class*='exp']:first-child"
             );
 
-            // ── SALARY — TARGET THE SPECIFIC LI, NOT THE WRAPPER ─────────────
             String salary = textOf(card,
-                    ".sal",                         // primary: dedicated salary element
+                    ".sal",
                     ".salary",
                     "li.salary",
                     "[class*='sal']:not([class*='exp'])"
             );
 
-            // ── Safety net: if they're the same string, one selector hit the wrapper ──
+            // Safety net logic for shared wrappers
             if (exp != null && salary != null && exp.equals(salary)) {
                 String[] parts = exp.split("\\|");
                 if (parts.length >= 2) {
@@ -253,7 +143,6 @@ public class NaukriScraper implements PortalScraper {
                 }
             }
 
-            // ── Additional safety: if exp looks like a salary, swap them ──────
             if (exp != null && looksLikeSalary(exp) && (salary == null || salary.isBlank())) {
                 salary = exp;
                 exp    = null;
@@ -263,7 +152,6 @@ public class NaukriScraper implements PortalScraper {
                 salary = null;
             }
 
-            // ── Job URL ───────────────────────────────────────────────────────
             ElementHandle linkEl = card.querySelector("a.title, a.jobTitle");
             String href = linkEl != null ? linkEl.getAttribute("href") : null;
 
@@ -271,7 +159,6 @@ public class NaukriScraper implements PortalScraper {
 
             String jobUrl = href.startsWith("http") ? href : BASE_URL + href;
 
-            // ── Detail page: fetch description + salary fallback ──────────────
             String description = "";
             Page detail = null;
             try {
@@ -291,7 +178,6 @@ public class NaukriScraper implements PortalScraper {
                         ""
                 );
 
-                // Salary fallback from detail page if card had none
                 if (salary == null || salary.isBlank()) {
                     String detailSalary = coalesce(
                             textFromPage(detail, ".sal"),
@@ -330,31 +216,20 @@ public class NaukriScraper implements PortalScraper {
         }
     }
 
-    // ─── Classification helpers ───────────────────────────────────────────────
-
     private boolean looksLikeSalary(String s) {
         if (s == null) return false;
         String lower = s.toLowerCase();
-        return lower.contains("lpa")
-                || lower.contains("lakh")
-                || lower.contains("lac")
-                || lower.contains("ctc")
-                || lower.contains("pa")
-                || lower.contains("₹")
-                || lower.contains("not disclosed")
-                || lower.contains("salary");
+        return lower.contains("lpa") || lower.contains("lakh") || lower.contains("lac")
+                || lower.contains("ctc") || lower.contains("pa") || lower.contains("₹")
+                || lower.contains("not disclosed") || lower.contains("salary");
     }
 
     private boolean looksLikeExperience(String s) {
         if (s == null) return false;
         String lower = s.toLowerCase();
-        return lower.contains("yr")
-                || lower.contains("year")
-                || lower.contains("fresher")
+        return lower.contains("yr") || lower.contains("year") || lower.contains("fresher")
                 || lower.matches(".*\\d+\\s*-\\s*\\d+.*");
     }
-
-    // ─── Standard helpers ─────────────────────────────────────────────────────
 
     private String buildSearchUrl(String role, String location) {
         String r = role.trim().toLowerCase().replace(" ", "-");

@@ -18,16 +18,34 @@ public interface JobListingRepository extends JpaRepository<JobListing, Long> {
 
     Page<JobListing> findByUserIdAndPortal(Long userId, String portal, Pageable pageable);
 
+    Page<JobListing> findByUserIdAndStatusAndPortal(Long userId, String status,
+                                                    String portal, Pageable pageable);
+
     boolean existsByUserIdAndPortalAndJobUrl(Long userId, String portal, String jobUrl);
 
     long countByUserIdAndStatus(Long userId, String status);
 
+    Optional<JobListing> findByIdAndUserId(Long id, Long userId);
+
     @Query("SELECT j FROM JobListing j WHERE j.user.id = :userId AND j.status = 'NEW' ORDER BY j.scrapedAt DESC")
     Page<JobListing> findNewJobsForUser(@Param("userId") Long userId, Pageable pageable);
 
-    Optional<JobListing> findByIdAndUserId(Long id, Long userId);
-
-    Page<JobListing> findByUserIdAndStatusAndPortal(Long userId, String status,
-                                                    String portal, Pageable pageable);
-
+    /**
+     * Find all jobs eligible to be processed by the application runner.
+     *
+     * Eligible statuses:
+     *   NEW      — just scraped, AI analysis will run on this pass
+     *   ANALYSED — was analysed in a previous run but runner did not reach it (limit hit)
+     *   FAILED   — previous apply attempt failed; retry on next run
+     *
+     * Excludes: APPLIED, SKIPPED, MANUAL, APPLYING
+     * (APPLYING is a transient state — if app crashed mid-apply, we retry it)
+     */
+    @Query("""
+        SELECT j FROM JobListing j
+        WHERE j.user.id = :userId
+        AND j.status IN ('NEW', 'ANALYSED', 'FAILED', 'APPLYING')
+        ORDER BY j.scrapedAt DESC
+    """)
+    Page<JobListing> findEligibleForRunner(@Param("userId") Long userId, Pageable pageable);
 }

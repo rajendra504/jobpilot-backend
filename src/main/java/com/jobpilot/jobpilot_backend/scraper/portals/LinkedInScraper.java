@@ -20,7 +20,7 @@ public class LinkedInScraper implements PortalScraper {
 
     private static final String BASE_URL  = "https://www.linkedin.com";
     private static final String JOBS_URL  = BASE_URL + "/jobs/search/";
-    private static final int MAX_PAGES    = 1;
+    private static final int MAX_PAGES    = 3;
     private static final int TIMEOUT_MS   = 60000;
 
     @Override
@@ -58,21 +58,20 @@ public class LinkedInScraper implements PortalScraper {
             StealthUtil.slowScroll(page);
             List<ElementHandle> cards = page.querySelectorAll("div.job-card-container");
 
-            int scrapedCount = 0;
+            log.info("[LinkedIn] Found {} cards for role: {}", cards.size(), role);
+
             for (ElementHandle card : cards) {
                 try {
                     ScrapedJobDto job = extractJob(page, card);
                     if (job != null) {
                         sink.add(job);
-                        scrapedCount++;
-                        if (scrapedCount >= 3) break; // TESTING LIMIT
                     }
                 } catch (Exception e) {
                     log.error("[LinkedIn] Error extracting job card: {}", e.getMessage());
                 }
+                // Delay between processing each card to maintain stealth
                 StealthUtil.humanDelay(2000, 4000);
             }
-            if (scrapedCount >= 3) break;
         }
     }
 
@@ -81,14 +80,14 @@ public class LinkedInScraper implements PortalScraper {
             String title = textOf(card, "a.job-card-list__title", "a.job-card-container__link");
             String company = textOf(card, ".artdeco-entity-lockup__subtitle", ".job-card-container__primary-description");
 
-            // ✅ UPDATED LOCATION (taken from first method - card level, more reliable)
+            // Location extraction (using your updated reliable selectors)
             String locationVal = textOf(card,
                     ".job-card-container__metadata-item",
                     ".artdeco-entity-lockup__caption",
                     "ul.job-card-container__metadata-wrapper li span",
                     "span.job-search-card__location");
 
-            // Easy Apply (Logic preserved)
+            // Easy Apply Logic
             String cardText = card.innerText();
             boolean isEasyApply = cardText != null && cardText.contains("Easy Apply");
 
@@ -110,11 +109,11 @@ public class LinkedInScraper implements PortalScraper {
                 if (safeNavigate(detail, jobUrl)) {
                     StealthUtil.humanDelay(3000, 5000);
 
-                    // Description
+                    // Description extraction
                     ElementHandle descEl = detail.querySelector("[data-testid='expandable-text-box'], .jobs-description__content");
                     description = (descEl != null) ? descEl.innerText() : "";
 
-                    // Salary & Experience (Insights)
+                    // Salary & Experience Insights
                     List<ElementHandle> insights = detail.querySelectorAll(".jobs-unified-top-card__job-insight, .jobs-description__job-insight-text");
 
                     for (ElementHandle insight : insights) {
@@ -132,7 +131,7 @@ public class LinkedInScraper implements PortalScraper {
                         }
                     }
 
-                    // Fallback using regex on description
+                    // Fallback using regex on description if insights failed
                     if (salary == null) {
                         salary = regexSearch(description, "(?i)salary[:\\s]+([^\\n]+)");
                     }
@@ -147,14 +146,16 @@ public class LinkedInScraper implements PortalScraper {
                 }
 
             } finally {
-                if (detail != null) detail.close();
+                if (detail != null) {
+                    try { detail.close(); } catch (Exception ignored) {}
+                }
             }
 
             return ScrapedJobDto.builder()
                     .portal("linkedin")
                     .jobTitle(clean(title))
                     .companyName(clean(company))
-                    .location(clean(locationVal)) //
+                    .location(clean(locationVal))
                     .salaryRange(clean(salary))
                     .experienceRequired(clean(experience))
                     .jobUrl(jobUrl)
@@ -164,6 +165,7 @@ public class LinkedInScraper implements PortalScraper {
                     .build();
 
         } catch (Exception e) {
+            log.debug("[LinkedIn] Card extraction error: {}", e.getMessage());
             return null;
         }
     }
@@ -203,17 +205,24 @@ public class LinkedInScraper implements PortalScraper {
     private String textOf(ElementHandle root, String... selectors) {
         for (String sel : selectors) {
             ElementHandle el = root.querySelector(sel);
-            if (el != null) return el.textContent().trim();
+            if (el != null) {
+                String txt = el.textContent();
+                if (txt != null && !txt.isBlank()) return txt.trim();
+            }
         }
         return null;
     }
 
     private List<String> resolveRoles(JobPreferences prefs) {
-        return (prefs.getDesiredRoles() == null || prefs.getDesiredRoles().isEmpty()) ? List.of("java developer") : prefs.getDesiredRoles();
+        if (prefs.getDesiredRoles() == null || prefs.getDesiredRoles().isEmpty())
+            return List.of("java developer");
+        return prefs.getDesiredRoles();
     }
 
     private String resolveLocation(JobPreferences prefs) {
-        return (prefs.getPreferredLocations() == null || prefs.getPreferredLocations().isEmpty()) ? "Hyderabad" : prefs.getPreferredLocations().get(0);
+        if (prefs.getPreferredLocations() == null || prefs.getPreferredLocations().isEmpty())
+            return "Hyderabad";
+        return prefs.getPreferredLocations().get(0);
     }
 
     private String clean(String s) {

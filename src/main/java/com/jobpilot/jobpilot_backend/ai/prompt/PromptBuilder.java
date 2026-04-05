@@ -76,7 +76,7 @@
 //   - If unsure → return []
 //
 //   Example:
-//   ["Kafka", "Docker"]
+//   ["Kafka", "Dockerfile"]
 //
 //   If none → []
 //

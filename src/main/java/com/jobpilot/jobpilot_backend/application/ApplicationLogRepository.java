@@ -15,10 +15,15 @@ public interface ApplicationLogRepository extends JpaRepository<ApplicationLog, 
 
     boolean existsByUserIdAndJobListingId(Long userId, Long jobListingId);
 
+    /**
+     * Used by runner to check if a job was already APPLIED (not just logged in any status).
+     * This prevents re-applying to a job that previously failed or was manual.
+     */
+    boolean existsByUserIdAndJobListingIdAndStatus(Long userId, Long jobListingId, String status);
+
     List<ApplicationLog> findByUserIdOrderByCreatedAtDesc(Long userId);
 
     List<ApplicationLog> findByUserIdAndStatusOrderByCreatedAtDesc(Long userId, String status);
-
 
     @Query("""
         SELECT COUNT(a) FROM ApplicationLog a
@@ -27,7 +32,6 @@ public interface ApplicationLogRepository extends JpaRepository<ApplicationLog, 
         AND DATE(a.appliedAt) = CURRENT_DATE
     """)
     int countAppliedTodayForUser(@Param("userId") Long userId);
-
 
     @Query("SELECT a.status, COUNT(a) FROM ApplicationLog a WHERE a.user.id = :userId GROUP BY a.status")
     List<Object[]> countByStatusForUser(@Param("userId") Long userId);
