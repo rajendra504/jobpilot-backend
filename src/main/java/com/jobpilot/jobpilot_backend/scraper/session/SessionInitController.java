@@ -10,26 +10,13 @@ import com.microsoft.playwright.options.LoadState;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
+import org.springframework.scheduling.annotation.Async;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
-/**
- * Manages one-time manual login sessions for portal scraping.
- *
- * ROOT CAUSE OF PREVIOUS BUG:
- *  Spring Boot handles each HTTP request on a different thread from the pool.
- *  Plain instance fields (activeContext, activeUserId) set on thread exec-3
- *  are NOT guaranteed to be visible on thread exec-4, exec-6 etc.
- *  The /confirm endpoint always saw null because it ran on a different thread.
- *
- * FIX:
- *  Use ConcurrentHashMap<userId, ActiveSession> — shared safely across all
- *  threads. Each user's session is keyed by their userId, so multiple users
- *  can run /init simultaneously without interfering with each other.
- */
 @Slf4j
 @RestController
 @RequestMapping("/sessions")
@@ -44,6 +31,7 @@ public class SessionInitController {
 
     private record ActiveSession(BrowserContext context, String portal) {}
 
+
     @PostMapping("/init")
     public ResponseEntity<ApiResponse<Map<String, String>>> initSession(
             @AuthenticationPrincipal UserPrincipal principal,
@@ -54,38 +42,50 @@ public class SessionInitController {
 
         closePendingSession(userId);
 
-        Browser browser = playwrightConfig.getBrowser();
-
-        BrowserContext context = browser.newContext();
-        Page page = context.newPage();
-        page.setDefaultTimeout(120_000);
-
         String loginUrl = getLoginUrl(portal);
-        page.navigate(loginUrl);
-        page.waitForLoadState(LoadState.DOMCONTENTLOADED);
 
-        pendingSessions.put(userId, new ActiveSession(context, portal.toLowerCase()));
-
-        log.info("Session stored in pendingSessions for userId={}. Map size={}",
-                userId, pendingSessions.size());
+        launchBrowserAsync(userId, portal, loginUrl);
 
         String instruction = switch (portal.toLowerCase()) {
-            case "linkedin" -> "LinkedIn login page is open in Chromium. " +
-                    "Log in manually (accept OTP on your phone if prompted). " +
-                    "Once you see your LinkedIn feed, call POST /api/sessions/confirm?portal=linkedin";
-            case "naukri"   -> "Naukri login page is open. Log in manually. " +
-                    "Once logged in, call POST /api/sessions/confirm?portal=naukri";
-            default         -> "Browser opened at " + loginUrl +
-                    ". Log in manually, then call POST /api/sessions/confirm?portal=" + portal;
+            case "linkedin" -> "LinkedIn login page is opening in the server's Chromium browser. " +
+                    "Wait ~10 seconds for it to load. On hosted deployments (Render) the browser is headless " +
+                    "— you cannot see it. Once ready, click 'Confirm & Save Session' to capture the cookies.";
+            case "naukri"   -> "Naukri login page is opening in the server's Chromium browser. " +
+                    "Wait ~10 seconds, then click 'Confirm & Save Session'.";
+            default         -> "Browser is opening at " + loginUrl +
+                    ". Wait ~10 seconds, then call POST /api/sessions/confirm?portal=" + portal;
         };
 
         return ResponseEntity.ok(ApiResponse.success(
-                "Browser opened for manual login.",
+                "Browser is being opened. Wait a few seconds, then confirm.",
                 Map.of("instruction", instruction,
                         "portal",      portal,
                         "loginUrl",    loginUrl,
                         "nextStep",    "POST /api/sessions/confirm?portal=" + portal)
         ));
+    }
+
+
+    @Async
+    public void launchBrowserAsync(Long userId, String portal, String loginUrl) {
+        try {
+            Browser browser = playwrightConfig.getBrowser();
+            BrowserContext context = browser.newContext();
+            Page page = context.newPage();
+            page.setDefaultTimeout(120_000);
+
+            log.info("[Async] Navigating to {} for userId={}", loginUrl, userId);
+            page.navigate(loginUrl);
+            page.waitForLoadState(LoadState.DOMCONTENTLOADED);
+
+            pendingSessions.put(userId, new ActiveSession(context, portal.toLowerCase()));
+
+            log.info("[Async] Session stored in pendingSessions for userId={}. Map size={}",
+                    userId, pendingSessions.size());
+        } catch (Exception e) {
+            log.error("[Async] Failed to open browser for userId={} portal={}: {}", userId, portal, e.getMessage());
+            // Don't put anything in pendingSessions — /confirm will return a clear error
+        }
     }
 
     @PostMapping("/confirm")
@@ -100,13 +100,12 @@ public class SessionInitController {
         ActiveSession pending = pendingSessions.get(userId);
 
         if (pending == null) {
-            log.warn("No pending session found for userId={}. Map size={}",
-                    userId, pendingSessions.size());
+            log.warn("No pending session found for userId={}. Map size={}", userId, pendingSessions.size());
             return ResponseEntity.badRequest().body(
                     ApiResponse.error(
-                            "No active init session found for your account. " +
-                                    "Please call POST /api/sessions/init?portal=" + portal + " first.")
-            );
+                            "No active browser session found. Either the browser is still loading " +
+                                    "(wait a few more seconds and try again), or it failed to start. " +
+                                    "Please call POST /api/sessions/init?portal=" + portal + " again."));
         }
 
         if (!portal.equalsIgnoreCase(pending.portal())) {
@@ -116,7 +115,6 @@ public class SessionInitController {
         }
 
         try {
-
             sessionService.saveSession(userId, portal, pending.context());
 
             pendingSessions.remove(userId);
@@ -165,7 +163,7 @@ public class SessionInitController {
 
         Long userId = principal.getId();
         sessionService.clearSession(userId, portal);
-        closePendingSession(userId);   // also clear any in-progress init
+        closePendingSession(userId);
 
         return ResponseEntity.ok(ApiResponse.success(
                 portal + " session cleared. You will be prompted to log in again on next scrape.",
