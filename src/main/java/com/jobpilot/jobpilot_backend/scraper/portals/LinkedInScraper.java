@@ -256,7 +256,11 @@ public class LinkedInScraper implements PortalScraper {
 
     private boolean isAuthWall(Page page) {
         String url = page.url();
-        return url.contains("login") || url.contains("checkpoint") || url.contains("authwall");
+        if (url.contains("login") || url.contains("checkpoint") || url.contains("authwall"))
+            return true;
+        try {
+            return page.querySelector(".authwall-join-form, #join-form, [data-id='authwall']") != null;
+        } catch (Exception e) { return false; }
     }
 
     private String buildUrl(String role, String location, int start) {

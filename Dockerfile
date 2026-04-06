@@ -1,28 +1,20 @@
-# Stage 1 — Build the JAR
-FROM maven:3.9.6-eclipse-temurin-21 AS build
-WORKDIR /app
-COPY pom.xml .
-COPY src ./src
-RUN mvn clean package -DskipTests
+FROM eclipse-temurin:21-jdk
 
-# Stage 2 — Run the JAR
-FROM eclipse-temurin:21-jre
-
-# Install Node.js (required by Playwright CLI to install browsers)
-RUN apt-get update && apt-get install -y curl && \
-    curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \
-    apt-get install -y nodejs && \
+# Install Playwright system deps
+RUN apt-get update && apt-get install -y \
+    libxcursor1 libgtk-3-0 libpangocairo-1.0-0 \
+    libcairo-gobject2 libgdk-pixbuf-2.0-0 \
+    libnss3 libatk1.0-0 libatk-bridge2.0-0 \
+    libxcomposite1 libxdamage1 libxfixes3 libxrandr2 \
+    libgbm1 libasound2 && \
     rm -rf /var/lib/apt/lists/*
 
-# Install Playwright CLI globally so we can run `playwright install`
-RUN npm install -g playwright
+COPY . .
+RUN mvn package -DskipTests
 
-# Install Chromium + its system dependencies via Playwright
-# This ensures the exact browser binary Playwright Java expects is present
-RUN playwright install chromium --with-deps
+# Pre-download Playwright browsers at build time
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+RUN mvn exec:java -e -Dexec.mainClass=com.microsoft.playwright.CLI \
+    -Dexec.args="install chromium" || true
 
-WORKDIR /app
-COPY --from=build /app/target/jobpilot-backend-0.0.1-SNAPSHOT.jar app.jar
-
-EXPOSE 8080
-ENTRYPOINT ["java", "-jar", "app.jar"]
+CMD ["java", "-jar", "target/jobpilot-backend.jar"]

@@ -3,6 +3,7 @@ package com.jobpilot.jobpilot_backend.scraper.config;
 import com.microsoft.playwright.Browser;
 import com.microsoft.playwright.BrowserType;
 import com.microsoft.playwright.Playwright;
+import com.microsoft.playwright.options.Proxy;
 import jakarta.annotation.PreDestroy;
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
@@ -27,6 +28,7 @@ public class PlaywrightConfig {
     public synchronized Browser getBrowser() {
         if (browser == null || !browser.isConnected()) {
             log.info("Initializing Playwright browser (headless={})", headless);
+            System.setProperty("PLAYWRIGHT_BROWSERS_PATH", "/ms-playwright");
             playwright = Playwright.create();
             browser = playwright.chromium().launch(
                     new BrowserType.LaunchOptions()
@@ -47,7 +49,6 @@ public class PlaywrightConfig {
                                     "--disable-site-isolation-trials",
                                     "--flag-switches-end"
                             ))
-                            // Use a real Chrome user-agent instead of HeadlessChrome
                             .setChromiumSandbox(false)
             );
             log.info("Playwright browser started.");
@@ -65,6 +66,7 @@ public class PlaywrightConfig {
                 .setViewportSize(1920, 1080)
                 .setLocale("en-US")
                 .setTimezoneId("Asia/Kolkata")
+                .setProxy(new Proxy("http://user:pass@proxy-host:port"))
                 .setExtraHTTPHeaders(java.util.Map.of(
                         "Accept-Language", "en-US,en;q=0.9",
                         "Accept-Encoding", "gzip, deflate, br",
