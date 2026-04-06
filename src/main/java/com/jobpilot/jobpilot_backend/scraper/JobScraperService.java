@@ -72,7 +72,7 @@ public class JobScraperService {
             preferences = preferencesService.getEntityByUserId(userId);
         } catch (ResourceNotFoundException e) {
             log.info("userId={} has no job preferences — skipping scrape", userId);
-            return ScrapeResultSummary.skipped("No job preferences found.");
+            return ScrapeResultSummary.skipped("No job preferences found. Please set up your preferences first.");
         }
 
         UserProfile profile = profileRepository.findByUserId(userId)
@@ -84,7 +84,17 @@ public class JobScraperService {
 
         if (rawCredMap.isEmpty()) {
             log.info("userId={} has no portal credentials — skipping scrape", userId);
-            return ScrapeResultSummary.skipped("No portal credentials saved.");
+            return ScrapeResultSummary.skipped("No portal credentials saved. Please add credentials in Profile → Credentials.");
+        }
+
+        try {
+            playwrightConfig.getBrowser();
+        } catch (Exception e) {
+            log.error("Playwright browser failed to start for userId={}: {}", userId, e.getMessage());
+            throw new IllegalStateException(
+                    "Browser automation is unavailable on this server. " +
+                            "Please ensure Playwright system dependencies are installed, " +
+                            "or run the scraper locally.");
         }
 
         User user = userRepository.findById(userId)
@@ -94,6 +104,7 @@ public class JobScraperService {
                 .collect(Collectors.toMap(PortalScraper::portalKey, s -> s));
 
         List<ScrapedJobDto> allScraped = new ArrayList<>();
+        List<String> portalErrors = new ArrayList<>();
 
         for (String portalKey : rawCredMap.keySet()) {
             String normalizedKey = portalKey.toLowerCase();
@@ -104,42 +115,17 @@ public class JobScraperService {
                 continue;
             }
 
-            Browser browser = playwrightConfig.getBrowser();
-            try (BrowserContext context = browser.newContext()) {
-
-                boolean sessionLoaded = sessionService.loadIntoContext(userId, normalizedKey, context);
-
-                if (!sessionLoaded) {
-                    log.warn("No saved session for portal='{}' userId={}. " +
-                                    "Call POST /api/sessions/init?portal={} to create one.",
-                            normalizedKey, userId, normalizedKey);
-                }
-
-                String username = "";
-                String password = "";
-                try {
-                    Map<String, String> decrypted =
-                            profileService.getDecryptedCredentials(userId, normalizedKey);
-                    username = decrypted.get("username");
-                    password = decrypted.get("password");
-                } catch (Exception e) {
-                    log.warn("Could not get credentials for portal='{}': {}", normalizedKey, e.getMessage());
-                }
-
-                Page page = context.newPage();
-                List<ScrapedJobDto> scraped = scraper.scrape(page, username, password, preferences);
-                allScraped.addAll(scraped);
-
-                if (!scraped.isEmpty() || sessionLoaded) {
-                    sessionService.saveSession(userId, normalizedKey, context);
-                }
-
+            try {
+                List<ScrapedJobDto> portalResults = scrapePortal(
+                        userId, normalizedKey, scraper, preferences);
+                allScraped.addAll(portalResults);
                 log.info("Portal='{}' returned {} jobs for userId={}",
-                        normalizedKey, scraped.size(), userId);
+                        normalizedKey, portalResults.size(), userId);
 
             } catch (Exception e) {
-                log.error("Scraper for portal='{}' threw an error for userId={}: {}",
+                log.error("Scraper for portal='{}' failed for userId={}: {}",
                         normalizedKey, userId, e.getMessage(), e);
+                portalErrors.add(normalizedKey + ": " + sanitizePortalError(e));
             }
         }
 
@@ -174,7 +160,60 @@ public class JobScraperService {
         log.info("Scrape done for userId={} | total={} saved={} skipped={}",
                 userId, allScraped.size(), savedCount, skippedCount);
 
-        return ScrapeResultSummary.success(allScraped.size(), savedCount, skippedCount);
+        return ScrapeResultSummary.success(allScraped.size(), savedCount, skippedCount, portalErrors);
+    }
+
+    private List<ScrapedJobDto> scrapePortal(Long userId, String normalizedKey,
+                                             PortalScraper scraper,
+                                             JobPreferences preferences) {
+        Browser browser = playwrightConfig.getBrowser();
+
+        try (BrowserContext context = browser.newContext()) {
+
+            boolean sessionLoaded = sessionService.loadIntoContext(userId, normalizedKey, context);
+
+            if (!sessionLoaded) {
+                log.warn("No saved session for portal='{}' userId={}. " +
+                                "Use POST /api/sessions/init?portal={} to create one.",
+                        normalizedKey, userId, normalizedKey);
+            }
+
+            String username = "";
+            String password = "";
+            try {
+                Map<String, String> decrypted =
+                        profileService.getDecryptedCredentials(userId, normalizedKey);
+                username = decrypted.get("username");
+                password = decrypted.get("password");
+            } catch (Exception e) {
+                log.warn("Could not get credentials for portal='{}': {}", normalizedKey, e.getMessage());
+            }
+
+            Page page = context.newPage();
+            List<ScrapedJobDto> scraped = scraper.scrape(page, username, password, preferences);
+
+            if (!scraped.isEmpty() || sessionLoaded) {
+                sessionService.saveSession(userId, normalizedKey, context);
+            }
+
+            return scraped;
+        }
+    }
+
+    private String sanitizePortalError(Exception e) {
+        String msg = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
+
+        if (msg.contains("Host system is missing") || msg.contains("playwright") || msg.contains("Chromium")) {
+            return "Browser dependencies missing on server";
+        }
+        if (msg.contains("Timeout") || msg.contains("timeout")) {
+            return "Timed out loading portal page";
+        }
+        if (msg.contains("net::ERR") || msg.contains("Navigation")) {
+            return "Network error reaching portal";
+        }
+        // Don't expose internal details
+        return "Portal scrape failed — check server logs";
     }
 
     @Transactional(readOnly = true)
@@ -238,15 +277,20 @@ public class JobScraperService {
                 .build();
     }
 
-    public record ScrapeResultSummary(boolean ran, int totalScraped, int newSaved,
-                                      int duplicatesSkipped, String skipReason) {
+    public record ScrapeResultSummary(
+            boolean ran,
+            int totalScraped,
+            int newSaved,
+            int duplicatesSkipped,
+            String skipReason,
+            List<String> portalErrors) {
 
-        static ScrapeResultSummary success(int scraped, int saved, int skipped) {
-            return new ScrapeResultSummary(true, scraped, saved, skipped, null);
+        static ScrapeResultSummary success(int scraped, int saved, int skipped, List<String> errors) {
+            return new ScrapeResultSummary(true, scraped, saved, skipped, null, errors);
         }
 
         static ScrapeResultSummary skipped(String reason) {
-            return new ScrapeResultSummary(false, 0, 0, 0, reason);
+            return new ScrapeResultSummary(false, 0, 0, 0, reason, List.of());
         }
     }
 }
