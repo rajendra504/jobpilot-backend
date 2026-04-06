@@ -1,18 +1,17 @@
 package com.jobpilot.jobpilot_backend.scraper;
 
 import com.jobpilot.jobpilot_backend.common.ApiResponse;
+import com.jobpilot.jobpilot_backend.scraper.JobScraperService.ScrapeStatus;
+import com.jobpilot.jobpilot_backend.scraper.async.ScrapeAsyncService;
 import com.jobpilot.jobpilot_backend.scraper.dto.JobListingResponse;
 import com.jobpilot.jobpilot_backend.security.UserPrincipal;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.http.ResponseEntity;
-import org.springframework.scheduling.annotation.Async;
 import org.springframework.security.core.Authentication;
-import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
 
 @RestController
 @RequestMapping("/jobs")
@@ -21,29 +20,41 @@ public class JobScraperController {
 
     private final JobScraperService scraperService;
 
-    @PostMapping("/scrape")
-    public ResponseEntity<ApiResponse<Map<String, Object>>> triggerScrape(
-            Authentication auth) {
+    private final ScrapeAsyncService scrapeAsyncService;
 
+    @PostMapping("/scrape")
+    public ResponseEntity<ApiResponse<Map<String, Object>>> triggerScrape(Authentication auth) {
         Long userId = ((UserPrincipal) auth.getPrincipal()).getId();
-        launchScrapeAsync(userId, auth);
+
+        ScrapeStatus current = scraperService.getScrapeStatus(userId);
+        if (current.running()) {
+            return ResponseEntity.ok(ApiResponse.success(
+                    "Scrape already in progress.",
+                    Map.of(
+                            "status",      "RUNNING",
+                            "phase",       current.phase(),
+                            "jobsSaved",   current.jobsSavedSoFar(),
+                            "message",     "A scrape is already running for your account. Check the status endpoint."
+                    )
+            ));
+        }
+
+        scrapeAsyncService.launchAsync(userId);
 
         return ResponseEntity.ok(ApiResponse.success(
                 "Scrape started in the background. New jobs will appear as they are found.",
                 Map.of(
                         "status",  "RUNNING",
-                        "message", "Refresh the job list every few seconds to see new results."
+                        "message", "Poll GET /api/jobs/scrape/status to track progress."
                 )
         ));
     }
 
-    @Async
-    public void launchScrapeAsync(Long userId, Authentication auth) {
-        try {
-            scraperService.triggerScrape(auth);
-        } catch (Exception e) {
-
-        }
+    @GetMapping("/scrape/status")
+    public ResponseEntity<ApiResponse<ScrapeStatus>> getScrapeStatus(Authentication auth) {
+        Long userId = ((UserPrincipal) auth.getPrincipal()).getId();
+        ScrapeStatus status = scraperService.getScrapeStatus(userId);
+        return ResponseEntity.ok(ApiResponse.success("Scrape status retrieved.", status));
     }
 
     @GetMapping

@@ -29,6 +29,7 @@ import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 
 @Service
@@ -46,13 +47,17 @@ public class JobScraperService {
     private final BrowserSessionService sessionService;
     private final List<PortalScraper>   portalScrapers;
 
-    @Transactional
+    private final ConcurrentHashMap<Long, ScrapeStatus> activeScrapes = new ConcurrentHashMap<>();
+
     public ScrapeResultSummary triggerScrape(Authentication auth) {
         Long userId = ((UserPrincipal) auth.getPrincipal()).getId();
         return runScrapeForUser(userId);
     }
 
-    @Transactional
+    public ScrapeResultSummary triggerScrapeForUser(Long userId) {
+        return runScrapeForUser(userId);
+    }
+
     public void scrapeForAllUsers() {
         List<User> users = userRepository.findAll();
         log.info("Scheduled scrape starting for {} users", users.size());
@@ -65,102 +70,109 @@ public class JobScraperService {
         }
     }
 
+    public ScrapeStatus getScrapeStatus(Long userId) {
+        return activeScrapes.getOrDefault(userId, new ScrapeStatus(false, 0, "IDLE", null));
+    }
+
     private ScrapeResultSummary runScrapeForUser(Long userId) {
 
-        JobPreferences preferences;
-        try {
-            preferences = preferencesService.getEntityByUserId(userId);
-        } catch (ResourceNotFoundException e) {
-            log.info("userId={} has no job preferences — skipping scrape", userId);
-            return ScrapeResultSummary.skipped("No job preferences found. Please set up your preferences first.");
+        ScrapeStatus existing = activeScrapes.get(userId);
+        if (existing != null && existing.running()) {
+            log.info("Scrape already running for userId={} — ignoring duplicate trigger", userId);
+            return ScrapeResultSummary.skipped("Scrape already in progress.");
         }
 
-        UserProfile profile = profileRepository.findByUserId(userId)
-                .orElseThrow(() -> new ResourceNotFoundException(
-                        "No user profile found for userId=" + userId));
-
-        Map<String, Map<String, String>> rawCredMap =
-                profileMapper.parseCredentialsMap(profile.getPortalCredentialsJson());
-
-        if (rawCredMap.isEmpty()) {
-            log.info("userId={} has no portal credentials — skipping scrape", userId);
-            return ScrapeResultSummary.skipped("No portal credentials saved. Please add credentials in Profile → Credentials.");
-        }
+        activeScrapes.put(userId, new ScrapeStatus(true, 0, "STARTING", null));
 
         try {
-            playwrightConfig.getBrowser();
-        } catch (Exception e) {
-            log.error("Playwright browser failed to start for userId={}: {}", userId, e.getMessage());
-            throw new IllegalStateException(
-                    "Browser automation is unavailable on this server. " +
-                            "Please ensure Playwright system dependencies are installed, " +
-                            "or run the scraper locally.");
-        }
+            JobPreferences preferences;
+            try {
+                preferences = preferencesService.getEntityByUserId(userId);
+            } catch (ResourceNotFoundException e) {
+                activeScrapes.remove(userId);
+                log.info("userId={} has no job preferences — skipping scrape", userId);
+                return ScrapeResultSummary.skipped("No job preferences found. Please set up your preferences first.");
+            }
 
-        User user = userRepository.findById(userId)
-                .orElseThrow(() -> new ResourceNotFoundException("User not found: " + userId));
+            UserProfile profile = profileRepository.findByUserId(userId).orElse(null);
+            if (profile == null) {
+                activeScrapes.remove(userId);
+                return ScrapeResultSummary.skipped("No user profile found. Please complete your profile first.");
+            }
 
-        Map<String, PortalScraper> scraperMap = portalScrapers.stream()
-                .collect(Collectors.toMap(PortalScraper::portalKey, s -> s));
+            Map<String, Map<String, String>> rawCredMap =
+                    profileMapper.parseCredentialsMap(profile.getPortalCredentialsJson());
 
-        List<ScrapedJobDto> allScraped = new ArrayList<>();
-        List<String> portalErrors = new ArrayList<>();
-
-        for (String portalKey : rawCredMap.keySet()) {
-            String normalizedKey = portalKey.toLowerCase();
-            PortalScraper scraper = scraperMap.get(normalizedKey);
-
-            if (scraper == null) {
-                log.info("No scraper registered for portal='{}' — skipping", normalizedKey);
-                continue;
+            if (rawCredMap.isEmpty()) {
+                activeScrapes.remove(userId);
+                return ScrapeResultSummary.skipped("No portal credentials saved. Please add credentials in Profile > Credentials.");
             }
 
             try {
-                List<ScrapedJobDto> portalResults = scrapePortal(
-                        userId, normalizedKey, scraper, preferences);
-                allScraped.addAll(portalResults);
-                log.info("Portal='{}' returned {} jobs for userId={}",
-                        normalizedKey, portalResults.size(), userId);
-
+                playwrightConfig.getBrowser();
             } catch (Exception e) {
-                log.error("Scraper for portal='{}' failed for userId={}: {}",
-                        normalizedKey, userId, e.getMessage(), e);
-                portalErrors.add(normalizedKey + ": " + sanitizePortalError(e));
+                log.error("Playwright browser failed to start for userId={}: {}", userId, e.getMessage());
+                activeScrapes.remove(userId);
+                throw new IllegalStateException(
+                        "Browser automation is unavailable on this server. " +
+                                "Playwright system dependencies may not be installed.");
             }
+
+            User user = userRepository.findById(userId)
+                    .orElseThrow(() -> new ResourceNotFoundException("User not found: " + userId));
+
+            Map<String, PortalScraper> scraperMap = portalScrapers.stream()
+                    .collect(Collectors.toMap(PortalScraper::portalKey, s -> s));
+
+            List<ScrapedJobDto> allScraped = new ArrayList<>();
+            List<String> portalErrors      = new ArrayList<>();
+            int savedSoFar                 = 0;
+
+            for (String portalKey : rawCredMap.keySet()) {
+                String normalizedKey = portalKey.toLowerCase();
+                PortalScraper scraper = scraperMap.get(normalizedKey);
+
+                if (scraper == null) {
+                    log.info("No scraper registered for portal='{}' — skipping", normalizedKey);
+                    continue;
+                }
+
+                activeScrapes.put(userId, new ScrapeStatus(true, savedSoFar,
+                        "SCRAPING_" + normalizedKey.toUpperCase(), null));
+
+                try {
+                    List<ScrapedJobDto> portalResults =
+                            scrapePortal(userId, normalizedKey, scraper, preferences);
+                    allScraped.addAll(portalResults);
+                    log.info("Portal='{}' returned {} jobs for userId={}",
+                            normalizedKey, portalResults.size(), userId);
+
+                    // Save per portal immediately so table updates live
+                    int saved = saveScrapedJobs(portalResults, user, userId);
+                    savedSoFar += saved;
+                    activeScrapes.put(userId, new ScrapeStatus(true, savedSoFar,
+                            "SCRAPING_" + normalizedKey.toUpperCase(), null));
+
+                } catch (Exception e) {
+                    log.error("Scraper for portal='{}' failed for userId={}: {}",
+                            normalizedKey, userId, e.getMessage(), e);
+                    portalErrors.add(normalizedKey + ": " + sanitizePortalError(e));
+                }
+            }
+
+            int totalScraped = allScraped.size();
+            int skippedCount = totalScraped - savedSoFar;
+
+            log.info("Scrape done for userId={} | total={} saved={} skipped={}",
+                    userId, totalScraped, savedSoFar, skippedCount);
+
+            activeScrapes.remove(userId);
+            return ScrapeResultSummary.success(totalScraped, savedSoFar, skippedCount, portalErrors);
+
+        } catch (Exception e) {
+            activeScrapes.remove(userId);
+            throw e;
         }
-
-        int savedCount   = 0;
-        int skippedCount = 0;
-
-        for (ScrapedJobDto dto : allScraped) {
-            boolean exists = listingRepository.existsByUserIdAndPortalAndJobUrl(
-                    userId, dto.getPortal(), dto.getJobUrl());
-
-            if (exists) { skippedCount++; continue; }
-
-            JobListing listing = JobListing.builder()
-                    .user(user)
-                    .portal(dto.getPortal())
-                    .jobTitle(dto.getJobTitle())
-                    .companyName(dto.getCompanyName())
-                    .location(dto.getLocation())
-                    .jobUrl(dto.getJobUrl())
-                    .description(dto.getDescription())
-                    .salaryRange(dto.getSalaryRange())
-                    .experienceRequired(dto.getExperienceRequired())
-                    .jobType(dto.getJobType())
-                    .isEasyApply(Boolean.TRUE.equals(dto.getIsEasyApply()))
-                    .status("NEW")
-                    .build();
-
-            listingRepository.save(listing);
-            savedCount++;
-        }
-
-        log.info("Scrape done for userId={} | total={} saved={} skipped={}",
-                userId, allScraped.size(), savedCount, skippedCount);
-
-        return ScrapeResultSummary.success(allScraped.size(), savedCount, skippedCount, portalErrors);
     }
 
     private List<ScrapedJobDto> scrapePortal(Long userId, String normalizedKey,
@@ -169,7 +181,6 @@ public class JobScraperService {
         Browser browser = playwrightConfig.getBrowser();
 
         try (BrowserContext context = browser.newContext()) {
-
             boolean sessionLoaded = sessionService.loadIntoContext(userId, normalizedKey, context);
 
             if (!sessionLoaded) {
@@ -200,20 +211,37 @@ public class JobScraperService {
         }
     }
 
-    private String sanitizePortalError(Exception e) {
-        String msg = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
+    @Transactional
+    public int saveScrapedJobs(List<ScrapedJobDto> dtos, User user, Long userId) {
+        int savedCount = 0;
+        for (ScrapedJobDto dto : dtos) {
+            try {
+                boolean exists = listingRepository.existsByUserIdAndPortalAndJobUrl(
+                        userId, dto.getPortal(), dto.getJobUrl());
+                if (exists) continue;
 
-        if (msg.contains("Host system is missing") || msg.contains("playwright") || msg.contains("Chromium")) {
-            return "Browser dependencies missing on server";
+                JobListing listing = JobListing.builder()
+                        .user(user)
+                        .portal(dto.getPortal())
+                        .jobTitle(dto.getJobTitle())
+                        .companyName(dto.getCompanyName())
+                        .location(dto.getLocation())
+                        .jobUrl(dto.getJobUrl())
+                        .description(dto.getDescription())
+                        .salaryRange(dto.getSalaryRange())
+                        .experienceRequired(dto.getExperienceRequired())
+                        .jobType(dto.getJobType())
+                        .isEasyApply(Boolean.TRUE.equals(dto.getIsEasyApply()))
+                        .status("NEW")
+                        .build();
+
+                listingRepository.save(listing);
+                savedCount++;
+            } catch (Exception e) {
+                log.warn("Failed to save one job listing (skipping): {}", e.getMessage());
+            }
         }
-        if (msg.contains("Timeout") || msg.contains("timeout")) {
-            return "Timed out loading portal page";
-        }
-        if (msg.contains("net::ERR") || msg.contains("Navigation")) {
-            return "Network error reaching portal";
-        }
-        // Don't expose internal details
-        return "Portal scrape failed — check server logs";
+        return savedCount;
     }
 
     @Transactional(readOnly = true)
@@ -257,6 +285,20 @@ public class JobScraperService {
         return toResponse(listingRepository.save(listing));
     }
 
+    private String sanitizePortalError(Exception e) {
+        String msg = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
+        if (msg.contains("Host system is missing") || msg.contains("playwright") || msg.contains("Chromium")) {
+            return "Browser dependencies missing on server";
+        }
+        if (msg.contains("Timeout") || msg.contains("timeout")) {
+            return "Timed out loading portal page";
+        }
+        if (msg.contains("net::ERR") || msg.contains("Navigation")) {
+            return "Network error reaching portal";
+        }
+        return "Portal scrape failed — check server logs";
+    }
+
     private JobListingResponse toResponse(JobListing j) {
         return JobListingResponse.builder()
                 .id(j.getId())
@@ -293,4 +335,10 @@ public class JobScraperService {
             return new ScrapeResultSummary(false, 0, 0, 0, reason, List.of());
         }
     }
+
+    public record ScrapeStatus(
+            boolean running,
+            int jobsSavedSoFar,
+            String phase,   // "IDLE" | "STARTING" | "SCRAPING_LINKEDIN" | "SCRAPING_NAUKRI"
+            String error) {}
 }
