@@ -1,6 +1,18 @@
+# ---------- STAGE 1: Build ----------
+FROM maven:3.9.9-eclipse-temurin-21 AS builder
+
+WORKDIR /app
+COPY . .
+
+RUN mvn clean package -DskipTests
+
+
+# ---------- STAGE 2: Runtime ----------
 FROM eclipse-temurin:21-jdk
 
-# Install Playwright system deps
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Install Playwright dependencies
 RUN apt-get update && apt-get install -y \
     libxcursor1 libgtk-3-0 libpangocairo-1.0-0 \
     libcairo-gobject2 libgdk-pixbuf-2.0-0 \
@@ -9,13 +21,13 @@ RUN apt-get update && apt-get install -y \
     libgbm1 libasound2t64 && \
     rm -rf /var/lib/apt/lists/*
 
-COPY . .
+WORKDIR /app
 
-RUN mvn package -DskipTests
+# Copy only the built JAR (not full project)
+COPY --from=builder /app/target/*.jar app.jar
 
 # Pre-download Playwright browsers
 ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
-RUN mvn exec:java -e -Dexec.mainClass=com.microsoft.playwright.CLI \
-    -Dexec.args="install chromium" || true
+RUN java -cp app.jar com.microsoft.playwright.CLI install chromium || true
 
-CMD ["java", "-jar", "target/jobpilot-backend.jar"]
+CMD ["java", "-jar", "app.jar"]
