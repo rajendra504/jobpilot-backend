@@ -1,18 +1,13 @@
-# ---------- BUILD STAGE ----------
-FROM maven:3.9.9-eclipse-temurin-21 AS build
-
+# Stage 1 — Build the JAR
+FROM maven:3.9.6-eclipse-temurin-21 AS build
 WORKDIR /app
-COPY . .
-
+COPY pom.xml .
+COPY src ./src
 RUN mvn clean package -DskipTests
 
-# ---------- RUN STAGE ----------
-FROM eclipse-temurin:21-jdk
-
+# Stage 2 — Run the JAR
+FROM eclipse-temurin:21-jre
 WORKDIR /app
-
-COPY --from=build /app/target/*.jar app.jar
-
+COPY --from=build /app/target/jobpilot-backend-0.0.1-SNAPSHOT.jar app.jar
 EXPOSE 8080
-
-ENTRYPOINT ["java","-jar","app.jar"]
+ENTRYPOINT ["java", "-jar", "app.jar"]
