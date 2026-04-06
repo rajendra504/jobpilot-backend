@@ -9,6 +9,8 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
+import java.util.List;
+
 @Component
 @Slf4j
 public class PlaywrightConfig {
@@ -29,16 +31,47 @@ public class PlaywrightConfig {
             browser = playwright.chromium().launch(
                     new BrowserType.LaunchOptions()
                             .setHeadless(headless)
-                            .setArgs(java.util.List.of(
+                            .setArgs(List.of(
                                     "--no-sandbox",
                                     "--disable-setuid-sandbox",
-                                    "--disable-dev-shm-usage",  // important for Linux servers
-                                    "--disable-blink-features=AutomationControlled" // avoid bot detection
+                                    "--disable-dev-shm-usage",
+                                    "--disable-blink-features=AutomationControlled",
+                                    "--disable-infobars",
+                                    "--disable-extensions",
+                                    "--disable-gpu",
+                                    "--window-size=1920,1080",
+                                    "--start-maximized",
+                                    // Hide headless mode from sites that check for it
+                                    "--disable-features=IsolateOrigins,site-per-process",
+                                    "--flag-switches-begin",
+                                    "--disable-site-isolation-trials",
+                                    "--flag-switches-end"
                             ))
+                            // Use a real Chrome user-agent instead of HeadlessChrome
+                            .setChromiumSandbox(false)
             );
             log.info("Playwright browser started.");
         }
         return browser;
+    }
+
+    public Browser.NewContextOptions stealthContextOptions() {
+        return new Browser.NewContextOptions()
+                .setUserAgent(
+                        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) " +
+                                "AppleWebKit/537.36 (KHTML, like Gecko) " +
+                                "Chrome/124.0.0.0 Safari/537.36"
+                )
+                .setViewportSize(1920, 1080)
+                .setLocale("en-US")
+                .setTimezoneId("Asia/Kolkata")
+                .setExtraHTTPHeaders(java.util.Map.of(
+                        "Accept-Language", "en-US,en;q=0.9",
+                        "Accept-Encoding", "gzip, deflate, br",
+                        "sec-ch-ua", "\"Chromium\";v=\"124\", \"Google Chrome\";v=\"124\", \"Not-A.Brand\";v=\"99\"",
+                        "sec-ch-ua-mobile", "?0",
+                        "sec-ch-ua-platform", "\"Windows\""
+                ));
     }
 
     @PreDestroy

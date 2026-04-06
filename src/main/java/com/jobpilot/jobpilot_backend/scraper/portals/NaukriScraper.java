@@ -12,14 +12,13 @@ import org.springframework.stereotype.Component;
 import java.util.ArrayList;
 import java.util.List;
 
-
 @Slf4j
 @Component
 public class NaukriScraper implements PortalScraper {
 
     private static final String BASE_URL   = "https://www.naukri.com";
     private static final int    MAX_PAGES  = 3;
-    private static final int    TIMEOUT_MS = 60_000;
+    private static final int    TIMEOUT_MS = 30_000;
 
     @Override
     public String portalKey() { return "naukri"; }
@@ -27,26 +26,30 @@ public class NaukriScraper implements PortalScraper {
     @Override
     public List<ScrapedJobDto> scrape(Page page, String username,
                                       String password, JobPreferences prefs) {
-
         List<ScrapedJobDto> allJobs = new ArrayList<>();
-
         page.setDefaultTimeout(TIMEOUT_MS);
 
-        // Warm-up: establishes cookies and avoids cold-start block
         log.info("[Naukri] Warming up via home page");
-        page.navigate(BASE_URL);
-        page.waitForLoadState(LoadState.DOMCONTENTLOADED);
-        StealthUtil.humanDelay(2000, 4000);
+        try {
+            page.navigate(BASE_URL, new Page.NavigateOptions()
+                    .setTimeout(TIMEOUT_MS));
+            page.waitForLoadState(LoadState.DOMCONTENTLOADED);
+        } catch (Exception e) {
+            log.warn("[Naukri] Home page load issue: {}", e.getMessage());
+        }
+        StealthUtil.randomMouseMove(page);
+        StealthUtil.humanDelay(3000, 5000);
 
-        List<String> roles = resolveRoles(prefs);
-        String location    = resolveLocation(prefs);
+        log.info("[Naukri] After warmup, current URL: {}", page.url());
 
+        List<String> roles    = resolveRoles(prefs);
+        String       location = resolveLocation(prefs);
         log.info("[Naukri] Scraping {} role(s) in '{}'", roles.size(), location);
 
         for (String role : roles) {
-            log.info("[Naukri] → Role: '{}'", role);
+            log.info("[Naukri] Role: '{}'", role);
             scrapeRole(page, role.trim(), location.trim(), allJobs);
-            StealthUtil.humanDelay(4000, 7000);
+            StealthUtil.humanDelay(4000, 8000);
         }
 
         log.info("[Naukri] Total collected: {} jobs", allJobs.size());
@@ -55,56 +58,83 @@ public class NaukriScraper implements PortalScraper {
 
     private void scrapeRole(Page page, String role, String location,
                             List<ScrapedJobDto> sink) {
-
         String searchUrl = buildSearchUrl(role, location);
         log.info("[Naukri] Search URL: {}", searchUrl);
 
-        page.navigate(searchUrl);
-        page.waitForLoadState(LoadState.DOMCONTENTLOADED);
-
-        if (!waitForCards(page)) {
-            log.error("[Naukri] No cards found for '{}' — blocked or structure changed", role);
+        try {
+            page.navigate(searchUrl, new Page.NavigateOptions().setTimeout(TIMEOUT_MS));
+            page.waitForLoadState(LoadState.DOMCONTENTLOADED);
+        } catch (Exception e) {
+            log.warn("[Naukri] Navigation issue for '{}': {}", role, e.getMessage());
             return;
         }
 
-        StealthUtil.humanDelay(2000, 4000);
+        StealthUtil.randomMouseMove(page);
+        StealthUtil.humanDelay(3000, 5000);
+        StealthUtil.slowScroll(page);
+
+        log.info("[Naukri] After navigation, URL: {}", page.url());
+
+        String pageContent = "";
+        try { pageContent = page.content(); } catch (Exception ignored) {}
+        if (pageContent.contains("captcha") || pageContent.contains("robot") || pageContent.contains("blocked")) {
+            log.error("[Naukri] Bot-detection page detected for '{}' — server IP is blocked", role);
+            return;
+        }
+
+        if (!waitForCards(page)) {
+
+            try {
+                String title = page.title();
+                log.error("[Naukri] No cards found for '{}'. Page title: '{}'", role, title);
+            } catch (Exception e) {
+                log.error("[Naukri] No cards found for '{}' — blocked or structure changed", role);
+            }
+            return;
+        }
+
+        StealthUtil.humanDelay(2000, 3000);
 
         for (int p = 0; p < MAX_PAGES; p++) {
-
-            log.info("[Naukri] Scraping listing page {} for '{}'", p + 1, role);
+            log.info("[Naukri] Scraping page {} for '{}'", p + 1, role);
 
             StealthUtil.slowScroll(page);
             StealthUtil.humanDelay(1500, 3000);
 
             List<ElementHandle> cards = page.querySelectorAll(
-                    "div.jobTuple, article.jobTuple, .cust-job-tuple"
+                    ".srp-jobtuple-wrapper, div.jobTuple, article.jobTuple, .cust-job-tuple, [class*='jobtuple']"
             );
 
-            log.info("[Naukri] Page {} → {} cards for '{}'", p + 1, cards.size(), role);
+            log.info("[Naukri] Page {} -> {} cards for '{}'", p + 1, cards.size(), role);
             if (cards.isEmpty()) break;
 
             for (ElementHandle card : cards) {
                 try {
                     ScrapedJobDto job = extractJob(page, card);
                     if (job != null) sink.add(job);
-                } catch (Exception ignored) {}
-
-                // Standard delay between processing cards
-                StealthUtil.humanDelay(1500, 3000);
+                } catch (Exception e) {
+                    log.debug("[Naukri] Card extraction error: {}", e.getMessage());
+                }
+                StealthUtil.humanDelay(500, 1500);
             }
 
-            // Pagination logic
-            ElementHandle nextBtn = page.querySelector("a.fright, a[title='Next']");
+            ElementHandle nextBtn = page.querySelector(
+                    "a[aria-label='Next'], a.fright.fs12.btn-secondary, a[title='Next'], button[aria-label='Next page']"
+            );
             if (nextBtn == null) {
                 log.info("[Naukri] No next button — end of results for '{}'", role);
                 break;
             }
 
-            nextBtn.click();
-            page.waitForLoadState(LoadState.DOMCONTENTLOADED);
-
-            if (!waitForCards(page)) {
-                log.warn("[Naukri] Cards not found after Next click — stopping");
+            try {
+                nextBtn.click();
+                page.waitForLoadState(LoadState.DOMCONTENTLOADED);
+                if (!waitForCards(page)) {
+                    log.warn("[Naukri] Cards not found after next click — stopping");
+                    break;
+                }
+            } catch (Exception e) {
+                log.warn("[Naukri] Next page click failed: {}", e.getMessage());
                 break;
             }
 
@@ -114,46 +144,50 @@ public class NaukriScraper implements PortalScraper {
 
     private ScrapedJobDto extractJob(Page page, ElementHandle card) {
         try {
-            String title = textOf(card, "a.title", "a.jobTitle");
-            String company = textOf(card, ".comp-name");
-            String loc = textOf(card, ".locWdth");
+
+            String title = textOf(card,
+                    "a.title", "a.jobTitle", ".row1 a", "a[title]",
+                    ".jobtuple-wrapper a", "[class*='title'] a",
+                    "a[href*='job-listings']"
+            );
+
+            String company = textOf(card,
+                    ".comp-name", ".companyInfo a", ".company-name",
+                    "[class*='comp']", ".orgName"
+            );
+
+            String loc = textOf(card,
+                    ".locWdth", ".location", ".loc", "[class*='loc']",
+                    "li.location span", ".jobTupleHeader ~ ul li:nth-child(3)"
+            );
 
             String exp = textOf(card,
-                    ".exp",
-                    ".experience",
-                    "li.exp",
-                    "[class*='exp']:first-child"
+                    ".exp", ".experience", "li.exp",
+                    "[class*='exp']:not([class*='comp'])"
             );
 
             String salary = textOf(card,
-                    ".sal",
-                    ".salary",
-                    "li.salary",
+                    ".sal", ".salary", "li.salary",
                     "[class*='sal']:not([class*='exp'])"
             );
 
-            // Safety net logic for shared wrappers
-            if (exp != null && salary != null && exp.equals(salary)) {
-                String[] parts = exp.split("\\|");
-                if (parts.length >= 2) {
-                    exp    = parts[0].trim();
-                    salary = parts[1].trim();
-                } else {
-                    salary = null;
-                }
-            }
-
             if (exp != null && looksLikeSalary(exp) && (salary == null || salary.isBlank())) {
-                salary = exp;
-                exp    = null;
+                salary = exp; exp = null;
             }
             if (salary != null && looksLikeExperience(salary) && (exp == null || exp.isBlank())) {
-                exp    = salary;
-                salary = null;
+                exp = salary; salary = null;
             }
 
-            ElementHandle linkEl = card.querySelector("a.title, a.jobTitle");
+            ElementHandle linkEl = card.querySelector(
+                    "a.title, a.jobTitle, a[href*='job-listings'], .jobtuple-wrapper a"
+            );
             String href = linkEl != null ? linkEl.getAttribute("href") : null;
+
+            if (title == null || href == null) {
+                ElementHandle anyLink = card.querySelector("a[href]");
+                if (anyLink != null) href = anyLink.getAttribute("href");
+                if (title == null) title = anyLink != null ? anyLink.textContent() : null;
+            }
 
             if (title == null || href == null) return null;
 
@@ -163,12 +197,10 @@ public class NaukriScraper implements PortalScraper {
             Page detail = null;
             try {
                 detail = page.context().newPage();
+                detail.setDefaultTimeout(20_000);
                 detail.navigate(jobUrl);
                 detail.waitForLoadState(LoadState.DOMCONTENTLOADED);
                 StealthUtil.humanDelay(1500, 3000);
-
-                detail.mouse().wheel(0, 400);
-                StealthUtil.humanDelay(600, 1200);
 
                 description = coalesce(
                         textFromPage(detail, ".job-desc"),
@@ -177,24 +209,10 @@ public class NaukriScraper implements PortalScraper {
                         textFromPage(detail, ".descript"),
                         ""
                 );
-
-                if (salary == null || salary.isBlank()) {
-                    String detailSalary = coalesce(
-                            textFromPage(detail, ".sal"),
-                            textFromPage(detail, ".salary"),
-                            textFromPage(detail, "[class*='sal']")
-                    );
-                    if (detailSalary != null && !looksLikeExperience(detailSalary)) {
-                        salary = detailSalary;
-                    }
-                }
-
             } catch (Exception e) {
                 log.debug("[Naukri] Detail page error for {}: {}", jobUrl, e.getMessage());
             } finally {
-                if (detail != null) {
-                    try { detail.close(); } catch (Exception ignored) {}
-                }
+                if (detail != null) { try { detail.close(); } catch (Exception ignored) {} }
             }
 
             return ScrapedJobDto.builder()
@@ -218,17 +236,16 @@ public class NaukriScraper implements PortalScraper {
 
     private boolean looksLikeSalary(String s) {
         if (s == null) return false;
-        String lower = s.toLowerCase();
-        return lower.contains("lpa") || lower.contains("lakh") || lower.contains("lac")
-                || lower.contains("ctc") || lower.contains("pa") || lower.contains("₹")
-                || lower.contains("not disclosed") || lower.contains("salary");
+        String l = s.toLowerCase();
+        return l.contains("lpa") || l.contains("lakh") || l.contains("lac")
+                || l.contains("ctc") || l.contains("pa") || l.contains("not disclosed");
     }
 
     private boolean looksLikeExperience(String s) {
         if (s == null) return false;
-        String lower = s.toLowerCase();
-        return lower.contains("yr") || lower.contains("year") || lower.contains("fresher")
-                || lower.matches(".*\\d+\\s*-\\s*\\d+.*");
+        String l = s.toLowerCase();
+        return l.contains("yr") || l.contains("year") || l.contains("fresher")
+                || s.matches(".*\\d+\\s*-\\s*\\d+.*");
     }
 
     private String buildSearchUrl(String role, String location) {
@@ -240,8 +257,9 @@ public class NaukriScraper implements PortalScraper {
     private boolean waitForCards(Page page) {
         try {
             page.waitForSelector(
-                    "div.jobTuple, article.jobTuple, .cust-job-tuple",
-                    new Page.WaitForSelectorOptions().setTimeout(15_000)
+                    ".srp-jobtuple-wrapper, div.jobTuple, article.jobTuple, " +
+                            ".cust-job-tuple, [class*='jobtuple']",
+                    new Page.WaitForSelectorOptions().setTimeout(20_000)
             );
             return true;
         } catch (Exception e) {
@@ -283,8 +301,7 @@ public class NaukriScraper implements PortalScraper {
         if (prefs.getDesiredRoles() == null || prefs.getDesiredRoles().isEmpty())
             return List.of("java developer");
         List<String> roles = prefs.getDesiredRoles().stream()
-                .filter(r -> r != null && !r.isBlank())
-                .toList();
+                .filter(r -> r != null && !r.isBlank()).toList();
         return roles.isEmpty() ? List.of("java developer") : roles;
     }
 

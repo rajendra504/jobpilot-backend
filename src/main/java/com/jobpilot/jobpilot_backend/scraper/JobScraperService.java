@@ -17,6 +17,7 @@ import com.jobpilot.jobpilot_backend.user.UserRepository;
 import com.microsoft.playwright.Browser;
 import com.microsoft.playwright.BrowserContext;
 import com.microsoft.playwright.Page;
+import com.jobpilot.jobpilot_backend.scraper.util.StealthUtil;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.PageRequest;
@@ -147,7 +148,6 @@ public class JobScraperService {
                     log.info("Portal='{}' returned {} jobs for userId={}",
                             normalizedKey, portalResults.size(), userId);
 
-                    // Save per portal immediately so table updates live
                     int saved = saveScrapedJobs(portalResults, user, userId);
                     savedSoFar += saved;
                     activeScrapes.put(userId, new ScrapeStatus(true, savedSoFar,
@@ -180,7 +180,10 @@ public class JobScraperService {
                                              JobPreferences preferences) {
         Browser browser = playwrightConfig.getBrowser();
 
-        try (BrowserContext context = browser.newContext()) {
+        try (BrowserContext context = browser.newContext(playwrightConfig.stealthContextOptions())) {
+
+            StealthUtil.applyStealth(context);
+
             boolean sessionLoaded = sessionService.loadIntoContext(userId, normalizedKey, context);
 
             if (!sessionLoaded) {
