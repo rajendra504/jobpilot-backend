@@ -1,5 +1,7 @@
 package com.jobpilot.jobpilot_backend.application;
 
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -15,15 +17,15 @@ public interface ApplicationLogRepository extends JpaRepository<ApplicationLog, 
 
     boolean existsByUserIdAndJobListingId(Long userId, Long jobListingId);
 
-    /**
-     * Used by runner to check if a job was already APPLIED (not just logged in any status).
-     * This prevents re-applying to a job that previously failed or was manual.
-     */
     boolean existsByUserIdAndJobListingIdAndStatus(Long userId, Long jobListingId, String status);
 
     List<ApplicationLog> findByUserIdOrderByCreatedAtDesc(Long userId);
 
     List<ApplicationLog> findByUserIdAndStatusOrderByCreatedAtDesc(Long userId, String status);
+
+    Page<ApplicationLog> findByUserIdOrderByCreatedAtDesc(Long userId, Pageable pageable);
+
+    Page<ApplicationLog> findByUserIdAndStatusOrderByCreatedAtDesc(Long userId, String status, Pageable pageable);
 
     @Query("""
         SELECT COUNT(a) FROM ApplicationLog a

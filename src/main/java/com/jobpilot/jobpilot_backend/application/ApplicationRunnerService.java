@@ -17,7 +17,7 @@ import com.jobpilot.jobpilot_backend.user.User;
 import com.jobpilot.jobpilot_backend.user.UserRepository;
 import com.microsoft.playwright.Browser;
 import com.microsoft.playwright.BrowserContext;
-import com.microsoft.playwright.Page;
+import org.springframework.data.domain.Page;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.PageRequest;
@@ -29,16 +29,7 @@ import java.time.LocalDateTime;
 import java.util.*;
 import java.util.stream.Collectors;
 
-/**
- * ApplicationRunnerService — orchestrates AI analysis → apply loop.
- *
- * KEY DESIGN:
- * - Operates on jobs with status IN ('NEW', 'ANALYSED') so re-runs work correctly.
- * - Runs AI analysis only on jobs that don't yet have a DONE analysis row.
- * - Builds the APPLY candidate list from the ai_analyses table (not job status).
- * - Jobs with AI decision SKIP are marked SKIPPED.
- * - Jobs with AI decision APPLY get attempted via the portal applier.
- */
+
 @Slf4j
 @Service
 @RequiredArgsConstructor
@@ -197,7 +188,7 @@ public class ApplicationRunnerService {
                 continue;
             }
 
-            Page page = context.newPage();
+            com.microsoft.playwright.Page page = context.newPage();
             String jobLabel = job.getJobTitle() + " at " + job.getCompanyName();
 
             try {
@@ -250,7 +241,6 @@ public class ApplicationRunnerService {
                 try { context.close(); } catch (Exception ignored) {}
             }
 
-            // Human delay between job applications
             StealthUtil.humanDelay(6000, 12000);
         }
 
@@ -270,8 +260,6 @@ public class ApplicationRunnerService {
         );
     }
 
-    // ─── Scheduled runner ─────────────────────────────────────────────────────
-
     public void runForAllAutoApplyUsers() {
         List<JobPreferences> activeUsers = prefsRepository.findAllWithAutoApplyEnabled();
         log.info("[Runner Scheduler] Running for {} auto-apply users", activeUsers.size());
@@ -284,8 +272,6 @@ public class ApplicationRunnerService {
             }
         }
     }
-
-    // ─── Query methods ────────────────────────────────────────────────────────
 
     @Transactional(readOnly = true)
     public List<ApplicationLogResponse> getLogs(Long userId) {
@@ -307,7 +293,17 @@ public class ApplicationRunnerService {
         return stats;
     }
 
-    // ─── Internal helpers ─────────────────────────────────────────────────────
+    @Transactional(readOnly = true)
+    public Page<ApplicationLogResponse> getLogsPaged(Long userId, String status, int page, int size) {
+        PageRequest pageable = PageRequest.of(page, size, Sort.by("createdAt").descending());
+
+        Page<ApplicationLog> raw = (status != null && !status.isBlank())
+                ? logRepository.findByUserIdAndStatusOrderByCreatedAtDesc(
+                userId, status.toUpperCase(), pageable)
+                : logRepository.findByUserIdOrderByCreatedAtDesc(userId, pageable);
+
+        return raw.map(this::toResponse);
+    }
 
     @Transactional
     protected void persistLog(User user, JobListing job, String status, String aiDecision,

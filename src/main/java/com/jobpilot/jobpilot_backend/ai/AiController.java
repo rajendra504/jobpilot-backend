@@ -4,6 +4,7 @@ import com.jobpilot.jobpilot_backend.ai.dto.AiAnalysisResponse;
 import com.jobpilot.jobpilot_backend.common.ApiResponse;
 import com.jobpilot.jobpilot_backend.security.UserPrincipal;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.Page;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
@@ -59,15 +60,16 @@ public class AiController {
     }
 
     @GetMapping("/analyses")
-    public ResponseEntity<ApiResponse<List<AiAnalysisResponse>>> getAllAnalyses(
+    public ResponseEntity<ApiResponse<Page<AiAnalysisResponse>>> getAllAnalyses(
             @AuthenticationPrincipal UserPrincipal principal,
-            @RequestParam(required = false) String decision) {
+            @RequestParam(required = false) String decision,
+            @RequestParam(defaultValue = "0")  int page,
+            @RequestParam(defaultValue = "15") int size) {
 
-        List<AiAnalysisResponse> results = decision != null
-                ? aiEngineService.getAnalysesByDecision(principal.getId(), decision)
-                : aiEngineService.getAllAnalyses(principal.getId());
+        Page<AiAnalysisResponse> results =
+                aiEngineService.getAllAnalysesPaged(principal.getId(), decision, page, size);
 
         return ResponseEntity.ok(ApiResponse.success(
-                results.size() + " analysis/analyses retrieved.", results));
+                results.getTotalElements() + " analysis/analyses retrieved.", results));
     }
 }

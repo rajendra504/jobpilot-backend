@@ -14,6 +14,9 @@ import com.jobpilot.jobpilot_backend.user.User;
 import com.jobpilot.jobpilot_backend.user.UserRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -145,7 +148,20 @@ public class AiEngineService {
                 .map(mapper::toResponse)
                 .toList();
     }
+    @Transactional(readOnly = true)
+    public Page<AiAnalysisResponse> getAllAnalysesPaged(
+            Long userId, String decision, int page, int size) {
 
+        PageRequest pageable = PageRequest.of(
+                page, size, Sort.by("matchScore").descending());
+
+        Page<AiAnalysis> raw = (decision != null && !decision.isBlank())
+                ? analysisRepository.findByUserIdAndDecisionOrderByMatchScoreDesc(
+                userId, decision.toUpperCase(), pageable)
+                : analysisRepository.findByUserIdOrderByMatchScoreDesc(userId, pageable);
+
+        return raw.map(mapper::toResponse);
+    }
     public AiAnalysis getAnalysisEntity(Long userId, Long jobListingId) {
         return analysisRepository.findByUserIdAndJobListingId(userId, jobListingId)
                 .orElseThrow(() -> new ResourceNotFoundException(
@@ -171,4 +187,6 @@ public class AiEngineService {
         }
         AiAnalysisResponse getCachedResult() { return cachedResult; }
     }
+
+
 }

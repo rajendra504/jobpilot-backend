@@ -5,6 +5,8 @@ import org.springframework.stereotype.Repository;
 
 import java.util.List;
 import java.util.Optional;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 
 @Repository
 public interface AiAnalysisRepository extends JpaRepository<AiAnalysis, Long> {
@@ -16,5 +18,9 @@ public interface AiAnalysisRepository extends JpaRepository<AiAnalysis, Long> {
     List<AiAnalysis> findByUserIdAndDecision(Long userId, String decision);
 
     List<AiAnalysis> findByUserIdOrderByMatchScoreDesc(Long userId);
+
+    Page<AiAnalysis> findByUserIdOrderByMatchScoreDesc(Long userId, Pageable pageable);
+
+    Page<AiAnalysis> findByUserIdAndDecisionOrderByMatchScoreDesc(Long userId, String decision, Pageable pageable);
 
 }

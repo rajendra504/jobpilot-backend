@@ -5,11 +5,11 @@ import com.jobpilot.jobpilot_backend.application.dto.RunResult;
 import com.jobpilot.jobpilot_backend.common.ApiResponse;
 import com.jobpilot.jobpilot_backend.security.UserPrincipal;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.Page;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
-import java.util.List;
 import java.util.Map;
 
 @RestController
@@ -34,15 +34,17 @@ public class ApplicationRunnerController {
     }
 
     @GetMapping("/logs")
-    public ResponseEntity<ApiResponse<List<ApplicationLogResponse>>> getLogs(
+    public ResponseEntity<ApiResponse<Page<ApplicationLogResponse>>> getLogs(
             @AuthenticationPrincipal UserPrincipal principal,
-            @RequestParam(required = false) String status
+            @RequestParam(required = false) String status,
+            @RequestParam(defaultValue = "0")  int page,
+            @RequestParam(defaultValue = "20") int size
     ) {
-        List<ApplicationLogResponse> logs = status != null
-                ? runnerService.getLogsByStatus(principal.getId(), status)
-                : runnerService.getLogs(principal.getId());
+        Page<ApplicationLogResponse> logs =
+                runnerService.getLogsPaged(principal.getId(), status, page, size);
 
-        return ResponseEntity.ok(ApiResponse.success("Application logs retrieved", logs));
+        return ResponseEntity.ok(ApiResponse.success(
+                "Application logs retrieved. Total: " + logs.getTotalElements(), logs));
     }
 
     @GetMapping("/stats")
